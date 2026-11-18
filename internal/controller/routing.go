@@ -25,12 +25,37 @@ import (
 	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 )
 
+// RoutingMode is how a Gazette's HTTPRoute reaches the shared Gateway.
+type RoutingMode string
+
+const (
+	// ModeListenerSet gives each Gazette a ListenerSet with its own HTTPS
+	// and HTTP listeners (and, with ClusterIssuer, its own certificate).
+	// The Gateway implementation must support ListenerSet.
+	ModeListenerSet RoutingMode = "listenerset"
+	// ModeGateway attaches each Gazette's HTTPRoute directly to the shared
+	// Gateway, whose listeners (and TLS certificates) the cluster operator
+	// manages, e.g. one HTTPS listener with a wildcard certificate. Works
+	// with any Gateway implementation, such as the Traefik bundled with k3s.
+	ModeGateway RoutingMode = "gateway"
+)
+
 // Routing configures how press exposes Gazettes through Gateway API. It is
 // disabled when Gateway.Name is empty.
 type Routing struct {
-	// Gateway is the shared Gateway that ListenerSets attach to. It must
-	// allow ListenerSets from the Gazettes' namespaces (spec.allowedListeners).
+	// Mode selects ModeListenerSet (the default) or ModeGateway.
+	Mode RoutingMode
+	// Gateway is the shared Gateway. In ModeListenerSet it must allow
+	// ListenerSets from the Gazettes' namespaces (spec.allowedListeners); in
+	// ModeGateway its listeners must allow HTTPRoutes from them.
 	Gateway types.NamespacedName
+	// GatewaySection optionally names the Gateway listener HTTPRoutes attach
+	// to in ModeGateway (parentRef sectionName).
+	GatewaySection string
+	// HTTPSPort and HTTPPort are the ListenerSet listener ports (default 443
+	// and 80). Some implementations require the ports of their entrypoints;
+	// the Traefik bundled with k3s uses 8443 and 8000.
+	HTTPSPort, HTTPPort int32
 	// Herald is herald's Service, which every HTTPRoute sends traffic to.
 	Herald     types.NamespacedName
 	HeraldPort int32
@@ -42,6 +67,19 @@ type Routing struct {
 
 // Enabled reports whether press manages routing.
 func (r Routing) Enabled() bool { return r.Gateway.Name != "" }
+
+func (r Routing) usesListenerSets() bool { return r.Mode != ModeGateway }
+
+func (r Routing) ports() (https, http int32) {
+	https, http = r.HTTPSPort, r.HTTPPort
+	if https == 0 {
+		https = 443
+	}
+	if http == 0 {
+		http = 80
+	}
+	return https, http
+}
 
 // Names of the per-Gazette routing objects, all in the Gazette's namespace.
 func routingName(g string) string         { return "manifesto-" + g }
@@ -76,30 +114,45 @@ func (r *GazetteReconciler) reconcileRouting(ctx context.Context, g *v1.Gazette,
 		cond.Message = "Not routed: another Gazette serves this domain"
 		return cond, nil
 	}
+	route := r.httpRoute(g)
+	if !r.Routing.usesListenerSets() {
+		// Remove what ModeListenerSet may have created before a mode change.
+		if err := r.deleteObjects(ctx, r.listenerSetObjects(g)...); err != nil {
+			return cond, err
+		}
+		if err := r.apply(ctx, g, route); err != nil {
+			return cond, err
+		}
+		return routedCondition(cond, nil, route, "Gateway", r.Routing.Gateway.Name), nil
+	}
+
 	if r.Routing.ClusterIssuer != "" {
 		if err := r.apply(ctx, g, r.certificate(g)); err != nil {
 			return cond, err
 		}
 	}
-	ls, route, redirect := r.listenerSet(g), r.httpRoute(g), r.redirectRoute(g)
+	ls, redirect := r.listenerSet(g), r.redirectRoute(g)
 	for _, obj := range []client.Object{ls, route, redirect} {
 		if err := r.apply(ctx, g, obj); err != nil {
 			return cond, err
 		}
 	}
-	return routedCondition(cond, ls, route), nil
+	return routedCondition(cond, ls, route, "ListenerSet", ls.Name), nil
 }
 
 // routedCondition reads what the Gateway implementation reported on the
-// ListenerSet and the HTTPRoute (as returned by the apply).
-func routedCondition(cond metav1.Condition, ls *gatewayv1.ListenerSet, route *gatewayv1.HTTPRoute) metav1.Condition {
+// ListenerSet (nil in ModeGateway) and on the HTTPRoute for the given parent
+// (as returned by the apply).
+func routedCondition(cond metav1.Condition, ls *gatewayv1.ListenerSet, route *gatewayv1.HTTPRoute, parentKind, parentName string) metav1.Condition {
 	var problems []string
-	if c := meta.FindStatusCondition(ls.Status.Conditions, string(gatewayv1.ListenerSetConditionProgrammed)); c == nil || c.Status != metav1.ConditionTrue {
-		problems = append(problems, "ListenerSet "+ls.Name+" is not programmed"+describe(c))
+	if ls != nil {
+		if c := meta.FindStatusCondition(ls.Status.Conditions, string(gatewayv1.ListenerSetConditionProgrammed)); c == nil || c.Status != metav1.ConditionTrue {
+			problems = append(problems, "ListenerSet "+ls.Name+" is not programmed"+describe(c))
+		}
 	}
 	routeProblem := "HTTPRoute " + route.Name + " is not accepted yet"
 	for _, p := range route.Status.Parents {
-		if p.ParentRef.Kind == nil || *p.ParentRef.Kind != "ListenerSet" || string(p.ParentRef.Name) != ls.Name {
+		if p.ParentRef.Kind == nil || string(*p.ParentRef.Kind) != parentKind || string(p.ParentRef.Name) != parentName {
 			continue
 		}
 		c := meta.FindStatusCondition(p.Conditions, string(gatewayv1.RouteConditionAccepted))
@@ -129,6 +182,7 @@ func describe(c *metav1.Condition) string {
 
 func (r *GazetteReconciler) listenerSet(g *v1.Gazette) *gatewayv1.ListenerSet {
 	host := gatewayv1.Hostname(g.Spec.Domain)
+	httpsPort, httpPort := r.Routing.ports()
 	same := &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{From: new(gatewayv1.NamespacesFromSame)}}
 	return &gatewayv1.ListenerSet{
 		ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: routingName(g.Name)},
@@ -139,14 +193,14 @@ func (r *GazetteReconciler) listenerSet(g *v1.Gazette) *gatewayv1.ListenerSet {
 			},
 			Listeners: []gatewayv1.ListenerEntry{
 				{
-					Name: listenerHTTPS, Hostname: &host, Port: 443, Protocol: gatewayv1.HTTPSProtocolType,
+					Name: listenerHTTPS, Hostname: &host, Port: httpsPort, Protocol: gatewayv1.HTTPSProtocolType,
 					TLS: &gatewayv1.ListenerTLSConfig{
 						Mode:            new(gatewayv1.TLSModeTerminate),
 						CertificateRefs: []gatewayv1.SecretObjectReference{{Name: gatewayv1.ObjectName(tlsSecretName(g.Name))}},
 					},
 					AllowedRoutes: same,
 				},
-				{Name: listenerHTTP, Hostname: &host, Port: 80, Protocol: gatewayv1.HTTPProtocolType, AllowedRoutes: same},
+				{Name: listenerHTTP, Hostname: &host, Port: httpPort, Protocol: gatewayv1.HTTPProtocolType, AllowedRoutes: same},
 			},
 		},
 	}
@@ -161,12 +215,25 @@ func listenerParent(g *v1.Gazette, section string) gatewayv1.ParentReference {
 	}
 }
 
-// httpRoute sends the domain's HTTPS traffic to herald.
+// httpRoute sends the domain's traffic to herald: the HTTPS listener of the
+// Gazette's ListenerSet, or the shared Gateway in ModeGateway.
 func (r *GazetteReconciler) httpRoute(g *v1.Gazette) *gatewayv1.HTTPRoute {
+	parent := listenerParent(g, listenerHTTPS)
+	if !r.Routing.usesListenerSets() {
+		parent = gatewayv1.ParentReference{
+			Group:     new(gatewayv1.Group(gatewayv1.GroupName)),
+			Kind:      new(gatewayv1.Kind("Gateway")),
+			Name:      gatewayv1.ObjectName(r.Routing.Gateway.Name),
+			Namespace: new(gatewayv1.Namespace(r.Routing.Gateway.Namespace)),
+		}
+		if r.Routing.GatewaySection != "" {
+			parent.SectionName = new(gatewayv1.SectionName(r.Routing.GatewaySection))
+		}
+	}
 	return &gatewayv1.HTTPRoute{
 		ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: routingName(g.Name)},
 		Spec: gatewayv1.HTTPRouteSpec{
-			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{listenerParent(g, listenerHTTPS)}},
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{parent}},
 			Hostnames:       []gatewayv1.Hostname{gatewayv1.Hostname(g.Spec.Domain)},
 			Rules: []gatewayv1.HTTPRouteRule{{
 				BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{
@@ -261,22 +328,31 @@ func applyObject(ctx context.Context, c client.Client, scheme *runtime.Scheme, o
 	return c.Get(ctx, client.ObjectKeyFromObject(obj), obj)
 }
 
-// deleteRouting removes the routing objects of g, if any.
-func (r *GazetteReconciler) deleteRouting(ctx context.Context, g *v1.Gazette) error {
+// listenerSetObjects are the objects only ModeListenerSet creates for g.
+func (r *GazetteReconciler) listenerSetObjects(g *v1.Gazette) []client.Object {
 	cert := &unstructured.Unstructured{}
 	cert.SetGroupVersionKind(certificateGVK)
-	objs := []client.Object{
+	cert.SetNamespace(g.Namespace)
+	cert.SetName(routingName(g.Name))
+	return []client.Object{
 		&gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: redirectName(g.Name)}},
-		&gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: routingName(g.Name)}},
 		&gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: routingName(g.Name)}},
+		cert,
 	}
-	if r.Routing.ClusterIssuer != "" {
-		cert.SetNamespace(g.Namespace)
-		cert.SetName(routingName(g.Name))
-		objs = append(objs, cert)
-	}
+}
+
+// deleteRouting removes the routing objects of g, if any.
+func (r *GazetteReconciler) deleteRouting(ctx context.Context, g *v1.Gazette) error {
+	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: routingName(g.Name)}}
+	return r.deleteObjects(ctx, append(r.listenerSetObjects(g), route)...)
+}
+
+// deleteObjects deletes objs that exist and press manages. A missing kind
+// (cert-manager or ListenerSet CRDs not installed) is treated as absent.
+func (r *GazetteReconciler) deleteObjects(ctx context.Context, objs ...client.Object) error {
 	for _, o := range objs {
-		if err := r.Delete(ctx, o); err != nil && !apierrors.IsNotFound(err) {
+		err := r.Delete(ctx, o)
+		if err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
 			return err
 		}
 	}

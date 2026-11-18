@@ -77,6 +77,8 @@ M1（MVP）與 M2（內容與網站）已完成。程式位置：
 - herald：`internal/herald`（`build.go` 快照、`feed.go` Wire 與 sitemap、`handler.go` 路由）
 - 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 上的 E2E 在 `test/e2e`；envtest 用的第三方 CRD 在 `test/crds`
 
-路由慣例：press 以 `--gateway-name` 啟用；每個擁有網域的 Gazette 在自己的 namespace 得到 `manifesto-<gazette>` 的 ListenerSet、HTTPRoute、`-redirect` HTTPRoute 與 Certificate（ownerReference 回收，不用 finalizer），herald 的 namespace 有每個 namespace 一個的 ReferenceGrant。
+目標環境：先以 k3s（內建 Traefik）做小規模正式測試，見 `docs/k3s.md`。新功能要能在 k3s 上運作：Traefik 不支援 ListenerSet（v3.8 前）、listener port 必須是 entrypoint port（8000/8443）、預設 StorageClass `local-path` 只有 RWO。
+
+路由慣例：press 以 `--gateway-name` 啟用，`--routing-mode=gateway`（k3s 用）只建立掛到 Gateway 的 HTTPRoute；預設的 `listenerset` 模式下，每個擁有網域的 Gazette 在自己的 namespace 得到 `manifesto-<gazette>` 的 ListenerSet、HTTPRoute、`-redirect` HTTPRoute 與 Certificate（ownerReference 回收，不用 finalizer），herald 的 namespace 有每個 namespace 一個的 ReferenceGrant。
 
 下一個里程碑：M3（媒體）— Print、Archive / ClusterArchive、darkroom（先 PVC driver，再 S3）。範圍外：desk、Edition、mfctl。

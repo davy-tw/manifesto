@@ -236,8 +236,8 @@ press 不產生渲染結果，但會用共用的 `internal/render` 試渲染一�
 
 - 不同 namespace 的 Gazette 搶同一個網域時，最早建立的生效，其他的把 status 設成 `DomainConflict`；同時間建立的依 namespace、名稱排序。規則放在 `internal/domain`，press 與 herald 共用
 - 主題：`typesetRef` 找不到時 `Ready` 為 `TypesetNotFound`，暫用內建主題；解析失敗為 `TemplateError`
-- **路由**（press 以 `--gateway-name`/`--gateway-namespace` 啟用，未設定就交給叢集管理者）：擁有網域的 Gazette 在自己的 namespace 得到以下物件，全部以 ownerReference 掛在 Gazette 下，刪除時由 K8s 回收，不需要 finalizer：
-  - `ListenerSet` `manifesto-<gazette>`：掛到共用 Gateway，含該網域的 HTTPS（443）與 HTTP（80）listener。Gateway 必須以 `spec.allowedListeners` 允許這些 namespace
+- **路由**（press 以 `--gateway-name`/`--gateway-namespace` 啟用，未設定就交給叢集管理者）有兩種模式。`gateway` 模式只建立掛到共用 Gateway 的 HTTPRoute（加上 ReferenceGrant），listener 與 TLS 由叢集管理者負責，適用於不支援 ListenerSet 的實作，例如 k3s 內建的 Traefik（見 `docs/k3s.md`）。預設的 `listenerset` 模式下，擁有網域的 Gazette 在自己的 namespace 得到以下物件，全部以 ownerReference 掛在 Gazette 下，刪除時由 K8s 回收，不需要 finalizer：
+  - `ListenerSet` `manifesto-<gazette>`：掛到共用 Gateway，含該網域的 HTTPS（預設 443）與 HTTP（預設 80）listener，port 可用參數調整。Gateway 必須以 `spec.allowedListeners` 允許這些 namespace
   - `HTTPRoute` `manifesto-<gazette>`：HTTPS listener 的流量導向 herald；`manifesto-<gazette>-redirect`：HTTP 以 301 轉址到 HTTPS
   - cert-manager `Certificate` `manifesto-<gazette>`（設定 `--cluster-issuer` 時）：簽發 Secret `manifesto-<gazette>-tls`。HTTP-01 驗證要經過每個 ListenerSet，建議用 DNS-01 的 ClusterIssuer
   - herald 所在 namespace 的 `ReferenceGrant` `manifesto-<namespace>`：允許該 namespace 的 HTTPRoute 指向 herald 的 Service；namespace 沒有 Gazette 時移除
