@@ -1,0 +1,13 @@
+{{ define "content" }}
+<ul class="dispatches">
+{{ range .Dispatches }}
+<li>
+<a href="{{ url .Name }}">{{ .Title }}</a>
+{{ with .PublishedAt }}<time datetime="{{ date "2006-01-02T15:04:05Z07:00" . }}">{{ date "2006-01-02" . }}</time>{{ end }}
+{{ with .Summary }}<p>{{ truncate 200 . }}</p>{{ end }}
+</li>
+{{ else }}
+<li>No dispatches yet.</li>
+{{ end }}
+</ul>
+{{ end }}
