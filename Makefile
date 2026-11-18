@@ -1,3 +1,5 @@
+# COMPONENT selects which binary the image contains: press or herald.
+COMPONENT ?= press
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
@@ -109,12 +111,17 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+build: manifests generate fmt vet ## Build press and herald binaries.
+	go build -o bin/press ./cmd/press
+	go build -o bin/herald ./cmd/herald
 
 .PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+run: manifests generate fmt vet ## Run press (the operator) from your host.
+	go run ./cmd/press
+
+.PHONY: run-herald
+run-herald: fmt vet ## Run herald (the visitor site) from your host.
+	go run ./cmd/herald
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -122,8 +129,8 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # Override BASE_IMAGE to build from another registry, e.g.
 # make docker-build IMG=<img> BASE_IMAGE=docker.io/library/golang:1.26
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) -t ${IMG} .
+docker-build: ## Build docker image for COMPONENT (press or herald; default press).
+	$(CONTAINER_TOOL) build $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) --build-arg COMPONENT=$(COMPONENT) -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
