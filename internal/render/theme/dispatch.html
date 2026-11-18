@@ -1,0 +1,8 @@
+{{ define "title" }}{{ .Dispatch.Title }} · {{ .Gazette.Title }}{{ end }}
+{{ define "content" }}
+<article>
+<h1>{{ .Dispatch.Title }}</h1>
+{{ with .Dispatch.PublishedAt }}<time datetime="{{ date "2006-01-02T15:04:05Z07:00" . }}">{{ date "2006-01-02" . }}</time>{{ end }}
+<div class="body">{{ .Dispatch.HTML }}</div>
+</article>
+{{ end }}
