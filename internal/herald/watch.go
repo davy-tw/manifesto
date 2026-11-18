@@ -33,7 +33,9 @@ func Watch(ctx context.Context, c cache.Cache, b *Builder, srv *Server) error {
 		UpdateFunc: func(any, any) { notify() },
 		DeleteFunc: func(any) { notify() },
 	}
-	for _, obj := range []client.Object{&v1.Gazette{}, &v1.Dispatch{}} {
+	for _, obj := range []client.Object{
+		&v1.Gazette{}, &v1.Dispatch{}, &v1.Scribe{}, &v1.Section{}, &v1.Stamp{}, &v1.Typeset{}, &v1.ClusterTypeset{},
+	} {
 		inf, err := c.GetInformer(ctx, obj)
 		if err != nil {
 			return fmt.Errorf("getting informer for %T: %w", obj, err)
@@ -52,17 +54,33 @@ func Watch(ctx context.Context, c cache.Cache, b *Builder, srv *Server) error {
 		case <-ctx.Done():
 			return nil
 		case <-trigger:
-			var gazettes v1.GazetteList
-			var dispatches v1.DispatchList
-			if err := c.List(ctx, &gazettes); err != nil {
-				b.Log.Error(err, "Failed to list Gazettes")
+			in, err := list(ctx, c)
+			if err != nil {
+				b.Log.Error(err, "Failed to list resources")
 				continue
 			}
-			if err := c.List(ctx, &dispatches); err != nil {
-				b.Log.Error(err, "Failed to list Dispatches")
-				continue
-			}
-			srv.Store(b.Build(gazettes.Items, dispatches.Items, srv.Snapshot()))
+			srv.Store(b.Build(in, srv.Snapshot()))
 		}
 	}
+}
+
+func list(ctx context.Context, c client.Reader) (Inputs, error) {
+	var (
+		gazettes   v1.GazetteList
+		dispatches v1.DispatchList
+		scribes    v1.ScribeList
+		sections   v1.SectionList
+		stamps     v1.StampList
+		typesets   v1.TypesetList
+		cluster    v1.ClusterTypesetList
+	)
+	for _, l := range []client.ObjectList{&gazettes, &dispatches, &scribes, &sections, &stamps, &typesets, &cluster} {
+		if err := c.List(ctx, l); err != nil {
+			return Inputs{}, err
+		}
+	}
+	return Inputs{
+		Gazettes: gazettes.Items, Dispatches: dispatches.Items, Scribes: scribes.Items,
+		Sections: sections.Items, Stamps: stamps.Items, Typesets: typesets.Items, ClusterTypesets: cluster.Items,
+	}, nil
 }

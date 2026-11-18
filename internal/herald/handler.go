@@ -28,8 +28,10 @@ func (s *Server) Store(snap *Snapshot) { s.snap.Store(snap) }
 // Snapshot returns the snapshot being served, or nil before the first build.
 func (s *Server) Snapshot() *Snapshot { return s.snap.Load() }
 
-// ServeHTTP answers /healthz, /readyz, and the pages of the Gazette whose
-// domain matches the Host header: / and /posts/{name}.
+// ServeHTTP answers /healthz, /readyz, and the pre-rendered pages of the
+// Gazette whose domain matches the Host header: /, /posts/{name},
+// /sections/{name}, /stamps/{name}, /scribes/{name} (each with /page/{n}),
+// /wire.xml and /sitemap.xml.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/healthz":
@@ -60,17 +62,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var e entry
-	switch {
-	case r.URL.Path == "/":
-		e = st.index
-	case strings.HasPrefix(r.URL.Path, "/posts/"):
-		name := strings.TrimPrefix(r.URL.Path, "/posts/")
-		var ok bool
-		if e, ok = st.posts[name]; !ok {
-			e = entry{status: http.StatusNotFound}
-		}
-	default:
+	e, ok := st.pages[r.URL.Path]
+	if !ok {
 		e = entry{status: http.StatusNotFound}
 	}
 	serveEntry(w, r, e)
@@ -92,7 +85,7 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Type", e.page.ContentType)
 	w.WriteHeader(http.StatusOK)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(e.page.Body)
