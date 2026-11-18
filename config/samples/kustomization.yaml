@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- manifesto_v1alpha1_gazette.yaml
+- manifesto_v1alpha1_dispatch.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
