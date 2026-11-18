@@ -1,123 +1,54 @@
-# manifesto
-// TODO(user): Add simple overview of use/purpose
+# Manifesto
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+Manifesto 是完全 Kubernetes 原生的部落格引擎：文章、分類、主題和媒體都是 CRD，系統邏輯由 operator 處理，權限交給 K8s RBAC。設計見 [`docs/design.md`](docs/design.md)。
 
-## Getting Started
+目前進度：**M1（MVP）**。`kubectl apply` 一篇 Dispatch，排程時間到自動發布，瀏覽器打開就看得到。
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+| 元件 | 位置 | 職責 |
+|---|---|---|
+| press | `cmd/press` | operator：決定 Dispatch 的 phase、排程發布、檢查引用、試渲染 |
+| herald | `cmd/herald` | 訪客端網站：唯讀監看資源，在記憶體中預先渲染，依 Host 提供頁面 |
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+## 本機試用
+
+需要 Go 1.26 和一個 Kubernetes 叢集（kind 或 k3d 都可以）。
 
 ```sh
-make docker-build docker-push IMG=<some-registry>/manifesto:tag
+make install                  # 安裝 CRD
+make run                      # 終端機 1：執行 press
+make run-herald               # 終端機 2：執行 herald，監聽 :8080
+
+kubectl create namespace blog-alice
+kubectl apply -n blog-alice -f config/samples/manifesto_v1alpha1_gazette.yaml
+kubectl apply -n blog-alice -f config/samples/manifesto_v1alpha1_dispatch.yaml
+kubectl get manifesto -n blog-alice
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
-
-**Install the CRDs into the cluster:**
+sample 的 Gazette 網域是 `alice.localtest.me`（解析到 127.0.0.1），所以可以直接開 <http://alice.localtest.me:8080/>，或是：
 
 ```sh
-make install
+curl -H 'Host: alice.localtest.me' http://localhost:8080/posts/hello-k8s
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+把 sample Dispatch 的 `publishAt` 改成幾分鐘後，可以看到它先是 `Embargoed`（herald 回 404），時間到自動變成 `Published`。
+
+## 部署
 
 ```sh
-make deploy IMG=<some-registry>/manifesto:tag
+make docker-build docker-push IMG=<registry>/manifesto-press:<tag>
+make docker-build docker-push COMPONENT=herald IMG=<registry>/manifesto-herald:<tag>
+make deploy IMG=<registry>/manifesto-press:<tag> HERALD_IMG=<registry>/manifesto-herald:<tag>
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+herald 的 Service 是 `manifesto-system/manifesto-herald`。M1 還不會自動建立 HTTPRoute，請自行把 Gateway 指過去（M2 會由 press 依 Gazette 的網域建立）。
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+## 開發
 
 ```sh
-kubectl apply -k config/samples/
+make test   # 單元測試 + envtest（包含 press 與 herald 的端到端測試）
+make lint
 ```
-
->**NOTE**: Ensure that the samples has default values to test it out.
-
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
-```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/manifesto:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/manifesto/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
-
+MIT License，見 [LICENSE](LICENSE)。

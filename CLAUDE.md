@@ -44,7 +44,7 @@ Manifesto 是完全 Kubernetes 原生的部落格引擎：內容都是 CRD，邏
 | Unlisted | 其他情況 | Unlisted | 200，不出現在列表、Wire、sitemap |
 | Retracted | — | Retracted | 410 Gone |
 
-- 第一次變成可見時寫入 `status.publishedAt`，之後不再改變，也不再看 `publishAt`
+- 第一次變成可見時寫入 `status.publishedAt`（`publishAt` 已過就用 `publishAt`，否則用當下時間），之後不再改變，也不再看 `publishAt`
 - Embargoed 回傳 `RequeueAfter(min(publishAt - now, 1h))`；reconcile 必須冪等
 - `Rendered` condition：press 用 `internal/render` 試渲染（輸出丟棄），失敗 reason 為 `MarkdownError` / `TemplateError`，message 截斷至 1KB；只有 condition 真的改變才寫 status
 - herald 渲染失敗時沿用上一次成功的結果；從來沒成功過回 503
@@ -76,5 +76,7 @@ Manifesto 是完全 Kubernetes 原生的部落格引擎：內容都是 CRD，邏
 3. press：Dispatch 狀態機、`gazetteRef`/`scribeRef` 檢查、`Rendered` condition
 4. herald：informer、依 Host 找 Gazette、記憶體內預先渲染、內建預設主題、ETag。快取 key 包含 Dispatch 與 Gazette 的 resourceVersion（Gazette 的標題、logo 也會影響頁面）；M2 加入 Typeset 後再把它的 resourceVersion 加進 key
 5. 測試：狀態機 envtest、渲染單元測試
+
+M1 已完成。程式位置：狀態機 `internal/controller/phase.go`、網域歸屬（press 與 herald 共用）`internal/domain`、herald 快照與路由 `internal/herald`、內建主題 `internal/render/theme/`、端到端測試 `internal/herald/milestone_test.go`。
 
 M1 範圍外（之後的里程碑）：Section/Stamp/Scribe/Typeset CRD、HTTPRoute 與 cert-manager、Print/Archive/darkroom、desk、Edition、mfctl。
