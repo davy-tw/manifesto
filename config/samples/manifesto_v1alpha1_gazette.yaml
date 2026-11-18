@@ -4,6 +4,9 @@ metadata:
   labels:
     app.kubernetes.io/name: manifesto
     app.kubernetes.io/managed-by: kustomize
-  name: gazette-sample
+  name: alice-notes
 spec:
-  # TODO(user): Add fields here
+  title: "Alice's Notes"
+  tagline: "寫給未來的自己"
+  domain: alice.localtest.me
+  language: zh-TW

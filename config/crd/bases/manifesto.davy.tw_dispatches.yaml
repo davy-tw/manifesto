@@ -8,16 +8,42 @@ metadata:
 spec:
   group: manifesto.davy.tw
   names:
+    categories:
+    - manifesto
     kind: Dispatch
     listKind: DispatchList
     plural: dispatches
+    shortNames:
+    - post
     singular: dispatch
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.title
+      name: Title
+      type: string
+    - jsonPath: .spec.gazetteRef
+      name: Gazette
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.publishedAt
+      name: Published
+      type: string
+    - jsonPath: .spec.publishAt
+      name: PublishAt
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Dispatch is the Schema for the dispatches API
+        description: |-
+          Dispatch is an article, published in exactly one Gazette. Its
+          metadata.name is the URL slug and its body is stored inline.
         properties:
           apiVersion:
             description: |-
@@ -37,27 +63,87 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of Dispatch
+            description: spec defines the desired state of the Dispatch
             properties:
-              foo:
-                description: foo is an example field of Dispatch. Edit dispatch_types.go
-                  to remove/update
+              content:
+                description: content is the body of the Dispatch.
+                properties:
+                  body:
+                    description: |-
+                      body is the article text. Media is referenced as "print:<name>", for
+                      example ![cover](print:hero-image).
+                    maxLength: 524288
+                    type: string
+                  format:
+                    default: markdown
+                    description: format is the markup language of body.
+                    enum:
+                    - markdown
+                    type: string
+                type: object
+              cover:
+                description: 'cover is the cover image, as a reference to a Print:
+                  "print:<name>".'
+                maxLength: 259
+                pattern: ^print:[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
+              gazetteRef:
+                description: |-
+                  gazetteRef is the name of the Gazette, in the same namespace, that this
+                  Dispatch is published in. A Dispatch belongs to exactly one Gazette.
+                maxLength: 253
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                type: string
+              publishAt:
+                description: |-
+                  publishAt is when a Published or Unlisted Dispatch first becomes
+                  visible. Unset or in the past means immediately. It is ignored for Draft
+                  and Retracted, and once the Dispatch has been visible (status.publishedAt
+                  is set) moving it into the future does not hide the Dispatch again.
+                format: date-time
+                type: string
+              scribeRef:
+                description: |-
+                  scribeRef is the name of the Scribe (author), in the same namespace,
+                  who wrote this Dispatch.
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                type: string
+              state:
+                default: Draft
+                description: |-
+                  state is the state the author asks for: Draft, Published, Unlisted or
+                  Retracted. press reports the resulting status.phase, which is Embargoed
+                  while a Published or Unlisted Dispatch waits for publishAt.
+                enum:
+                - Draft
+                - Published
+                - Unlisted
+                - Retracted
+                type: string
+              summary:
+                description: summary is a short description used in listings and the
+                  Wire feed.
+                maxLength: 1024
+                type: string
+              title:
+                description: title is the headline of the Dispatch.
+                maxLength: 256
+                minLength: 1
+                type: string
+            required:
+            - gazetteRef
+            - title
             type: object
           status:
-            description: status defines the observed state of Dispatch
+            description: status is the state of the Dispatch as observed by press
             properties:
               conditions:
                 description: |-
-                  conditions represent the current state of the Dispatch resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                  conditions describe the Dispatch's current state. "Ready" is False when
+                  the Gazette or Scribe it refers to does not exist; "Rendered" is False
+                  when its content or theme fails to render.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,10 +202,40 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the metadata.generation that the
+                  status reflects.
+                format: int64
+                type: integer
+              phase:
+                description: |-
+                  phase is the state press decided on: Draft, Embargoed, Published,
+                  Unlisted or Retracted.
+                enum:
+                - Draft
+                - Embargoed
+                - Published
+                - Unlisted
+                - Retracted
+                type: string
+              publishedAt:
+                description: |-
+                  publishedAt is when the Dispatch first became visible. It never changes
+                  once set.
+                format: date-time
+                type: string
+              url:
+                description: url is the public address of the Dispatch.
+                type: string
             type: object
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: 'metadata.name is the URL slug and must be a DNS label: lowercase
+            letters, digits and ''-'', at most 63 characters'
+          rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$') && size(self.metadata.name)
+            <= 63
     served: true
     storage: true
     subresources:

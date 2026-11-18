@@ -8,16 +8,36 @@ metadata:
 spec:
   group: manifesto.davy.tw
   names:
+    categories:
+    - manifesto
     kind: Gazette
     listKind: GazetteList
     plural: gazettes
+    shortNames:
+    - blog
     singular: gazette
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.title
+      name: Title
+      type: string
+    - jsonPath: .spec.domain
+      name: Domain
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Gazette is the Schema for the gazettes API
+        description: |-
+          Gazette is a blog site: a publication with its own domain, title and
+          branding. A namespace (the publisher) may run several Gazettes, and every
+          Dispatch belongs to exactly one of them.
         properties:
           apiVersion:
             description: |-
@@ -37,27 +57,50 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of Gazette
+            description: spec defines the desired state of the Gazette
             properties:
-              foo:
-                description: foo is an example field of Gazette. Edit gazette_types.go
-                  to remove/update
+              domain:
+                description: |-
+                  domain is the host name visitors use to reach this Gazette, for example
+                  "alice.example.io". herald picks the Gazette by the request's Host header.
+                  When Gazettes in different namespaces claim the same domain, the oldest
+                  one wins and the others report DomainConflict.
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                 type: string
+              language:
+                description: |-
+                  language is the BCP 47 language tag of the site's content, for example
+                  "zh-TW". It is written to the html lang attribute and the Wire feed.
+                maxLength: 35
+                pattern: ^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$
+                type: string
+              logo:
+                description: 'logo is the site logo, as a reference to a Print: "print:<name>".'
+                maxLength: 259
+                pattern: ^print:[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              tagline:
+                description: tagline is a short line shown under the title.
+                maxLength: 512
+                type: string
+              title:
+                description: title is the site name shown in page titles, headers
+                  and the Wire feed.
+                maxLength: 256
+                minLength: 1
+                type: string
+            required:
+            - domain
+            - title
             type: object
           status:
-            description: status defines the observed state of Gazette
+            description: status is the state of the Gazette as observed by press
             properties:
               conditions:
                 description: |-
-                  conditions represent the current state of the Gazette resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                  conditions describe the Gazette's current state. "Ready" is True when the
+                  Gazette owns its domain and can be served.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,6 +159,14 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the metadata.generation that the
+                  status reflects.
+                format: int64
+                type: integer
+              url:
+                description: url is the public address of the Gazette's front page.
+                type: string
             type: object
         required:
         - spec

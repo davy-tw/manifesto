@@ -4,6 +4,16 @@ metadata:
   labels:
     app.kubernetes.io/name: manifesto
     app.kubernetes.io/managed-by: kustomize
-  name: dispatch-sample
+  name: hello-k8s
 spec:
-  # TODO(user): Add fields here
+  gazetteRef: alice-notes
+  title: "Hello K8s"
+  summary: "第一篇文章"
+  state: Published
+  publishAt: "2026-11-20T09:00:00+08:00"
+  content:
+    format: markdown
+    body: |
+      # Hello K8s
+
+      這篇文章是一個 Dispatch。
