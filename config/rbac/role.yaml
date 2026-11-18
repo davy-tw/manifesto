@@ -10,20 +10,9 @@ rules:
   - dispatches
   - gazettes
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
-- apiGroups:
-  - manifesto.davy.tw
-  resources:
-  - dispatches/finalizers
-  - gazettes/finalizers
-  verbs:
-  - update
 - apiGroups:
   - manifesto.davy.tw
   resources:
@@ -32,4 +21,3 @@ rules:
   verbs:
   - get
   - patch
-  - update
