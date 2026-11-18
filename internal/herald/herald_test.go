@@ -82,7 +82,7 @@ func TestStatusCodes(t *testing.T) {
 		dispatch("retracted", v1.PhaseRetracted, t0),
 		dispatch("unreconciled", "", time.Time{}),
 	}
-	snap := newBuilder(render.DefaultTheme()).Build([]v1.Gazette{gazette()}, ds, nil)
+	snap := newBuilder(render.DefaultTheme()).Build(Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: ds}, nil)
 
 	tests := []struct {
 		host, path string
@@ -116,7 +116,7 @@ func TestIndexListsOnlyPublishedNewestFirst(t *testing.T) {
 		dispatch("unlisted", v1.PhaseUnlisted, t0.Add(2*time.Hour)),
 		dispatch("draft", v1.PhaseDraft, time.Time{}),
 	}
-	snap := newBuilder(render.DefaultTheme()).Build([]v1.Gazette{gazette()}, ds, nil)
+	snap := newBuilder(render.DefaultTheme()).Build(Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: ds}, nil)
 	page := body(t, get(t, snap, host, "/", nil))
 	iNew, iOld := strings.Index(page, "/posts/new"), strings.Index(page, "/posts/old")
 	if iNew < 0 || iOld < 0 || iNew > iOld {
@@ -130,8 +130,8 @@ func TestIndexListsOnlyPublishedNewestFirst(t *testing.T) {
 }
 
 func TestDispatchPageContent(t *testing.T) {
-	snap := newBuilder(render.DefaultTheme()).Build([]v1.Gazette{gazette()},
-		[]v1.Dispatch{dispatch("hello", v1.PhasePublished, t0)}, nil)
+	snap := newBuilder(render.DefaultTheme()).Build(Inputs{Gazettes: []v1.Gazette{gazette()},
+		Dispatches: []v1.Dispatch{dispatch("hello", v1.PhasePublished, t0)}}, nil)
 	r := get(t, snap, host, "/posts/hello", nil)
 	if ct := r.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
 		t.Errorf("Content-Type = %q", ct)
@@ -147,7 +147,7 @@ func TestDispatchPageContent(t *testing.T) {
 func TestDispatchOfAnotherGazetteIsNotServed(t *testing.T) {
 	d := dispatch("elsewhere", v1.PhasePublished, t0)
 	d.Spec.GazetteRef = "other"
-	snap := newBuilder(render.DefaultTheme()).Build([]v1.Gazette{gazette()}, []v1.Dispatch{d}, nil)
+	snap := newBuilder(render.DefaultTheme()).Build(Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: []v1.Dispatch{d}}, nil)
 	if got := get(t, snap, host, "/posts/elsewhere", nil).StatusCode; got != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", got)
 	}
@@ -160,7 +160,7 @@ func TestDomainConflictServesOldestGazette(t *testing.T) {
 	newer.CreationTimestamp = metav1.NewTime(t0.Add(time.Minute))
 	d := dispatch("mallory", v1.PhasePublished, t0)
 	d.Namespace = "blog-mallory"
-	snap := newBuilder(render.DefaultTheme()).Build([]v1.Gazette{newer, older}, []v1.Dispatch{d}, nil)
+	snap := newBuilder(render.DefaultTheme()).Build(Inputs{Gazettes: []v1.Gazette{newer, older}, Dispatches: []v1.Dispatch{d}}, nil)
 	if got := get(t, snap, host, "/posts/mallory", nil).StatusCode; got != http.StatusNotFound {
 		t.Errorf("newer Gazette's Dispatch status = %d, want 404", got)
 	}
@@ -170,7 +170,7 @@ func TestETag(t *testing.T) {
 	b := newBuilder(render.DefaultTheme())
 	g := gazette()
 	d := dispatch("hello", v1.PhasePublished, t0)
-	snap := b.Build([]v1.Gazette{g}, []v1.Dispatch{d}, nil)
+	snap := b.Build(Inputs{Gazettes: []v1.Gazette{g}, Dispatches: []v1.Dispatch{d}}, nil)
 
 	r := get(t, snap, host, "/posts/hello", nil)
 	etag := r.Header.Get("ETag")
@@ -189,7 +189,7 @@ func TestETag(t *testing.T) {
 	// Changing the Gazette (its title is on every page) changes the ETag.
 	g.ResourceVersion = "2"
 	g.Spec.Title = "Renamed"
-	snap2 := b.Build([]v1.Gazette{g}, []v1.Dispatch{d}, snap)
+	snap2 := b.Build(Inputs{Gazettes: []v1.Gazette{g}, Dispatches: []v1.Dispatch{d}}, snap)
 	r2 := get(t, snap2, host, "/posts/hello", nil)
 	if r2.Header.Get("ETag") == etag || !strings.Contains(body(t, r2), "Renamed") {
 		t.Errorf("Gazette change did not produce a new page")
@@ -199,20 +199,20 @@ func TestETag(t *testing.T) {
 func TestUnchangedPagesAreReused(t *testing.T) {
 	b := newBuilder(render.DefaultTheme())
 	ds := []v1.Dispatch{dispatch("a", v1.PhasePublished, t0), dispatch("b", v1.PhasePublished, t0)}
-	snap := b.Build([]v1.Gazette{gazette()}, ds, nil)
+	snap := b.Build(Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: ds}, nil)
 
 	ds[1].ResourceVersion = "2"
 	ds[1].Spec.Title = "B, edited"
-	snap2 := b.Build([]v1.Gazette{gazette()}, ds, snap)
+	snap2 := b.Build(Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: ds}, snap)
 
 	site1, site2 := snap.sites[host], snap2.sites[host]
-	if site1.posts["a"].page != site2.posts["a"].page {
+	if site1.pages["/posts/a"].page != site2.pages["/posts/a"].page {
 		t.Error("unchanged Dispatch was re-rendered")
 	}
-	if site1.posts["b"].page == site2.posts["b"].page {
+	if site1.pages["/posts/b"].page == site2.pages["/posts/b"].page {
 		t.Error("changed Dispatch was not re-rendered")
 	}
-	if site1.index.page == site2.index.page {
+	if site1.pages["/"].page == site2.pages["/"].page {
 		t.Error("index was not re-rendered after a listed Dispatch changed")
 	}
 }
@@ -228,17 +228,17 @@ func TestRenderFailureKeepsLastGoodPage(t *testing.T) {
 	}
 	g := gazette()
 	d := dispatch("hello", v1.PhasePublished, t0)
-	good := newBuilder(render.DefaultTheme()).Build([]v1.Gazette{g}, []v1.Dispatch{d}, nil)
+	good := newBuilder(render.DefaultTheme()).Build(Inputs{Gazettes: []v1.Gazette{g}, Dispatches: []v1.Dispatch{d}}, nil)
 
 	// The Dispatch changes, but rendering now fails: the old page stays.
 	d.ResourceVersion = "2"
-	snap := newBuilder(broken).Build([]v1.Gazette{g}, []v1.Dispatch{d}, good)
+	snap := newBuilder(broken).Build(Inputs{Gazettes: []v1.Gazette{g}, Dispatches: []v1.Dispatch{d}}, good)
 	if r := get(t, snap, host, "/posts/hello", nil); r.StatusCode != http.StatusOK || !strings.Contains(body(t, r), "Title of hello") {
 		t.Errorf("want the last good page, got status %d", r.StatusCode)
 	}
 
 	// A page that never rendered answers 503.
-	fresh := newBuilder(broken).Build([]v1.Gazette{g}, []v1.Dispatch{d}, nil)
+	fresh := newBuilder(broken).Build(Inputs{Gazettes: []v1.Gazette{g}, Dispatches: []v1.Dispatch{d}}, nil)
 	for _, p := range []string{"/", "/posts/hello"} {
 		if got := get(t, fresh, host, p, nil).StatusCode; got != http.StatusServiceUnavailable {
 			t.Errorf("%s: status = %d, want 503", p, got)
@@ -264,7 +264,7 @@ func TestHealthAndMethods(t *testing.T) {
 	if got := do(http.MethodGet, "/"); got != http.StatusServiceUnavailable {
 		t.Errorf("/ before first build = %d, want 503", got)
 	}
-	srv.Store(newBuilder(render.DefaultTheme()).Build([]v1.Gazette{gazette()}, nil, nil))
+	srv.Store(newBuilder(render.DefaultTheme()).Build(Inputs{Gazettes: []v1.Gazette{gazette()}}, nil))
 	if got := do(http.MethodGet, "/readyz"); got != http.StatusOK {
 		t.Errorf("/readyz after first build = %d", got)
 	}

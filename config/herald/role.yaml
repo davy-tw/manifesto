@@ -13,6 +13,11 @@ rules:
   resources:
   - gazettes
   - dispatches
+  - scribes
+  - sections
+  - stamps
+  - typesets
+  - clustertypesets
   verbs:
   - get
   - list
