@@ -10,3 +10,8 @@ spec:
   tagline: "寫給未來的自己"
   domain: alice.localtest.me
   language: zh-TW
+  typesetRef:
+    kind: ClusterTypeset
+    name: minimal
+  typesetParams:
+    accentColor: "#e11d48"

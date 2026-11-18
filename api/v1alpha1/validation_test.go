@@ -169,3 +169,57 @@ func TestDispatchDefaults(t *testing.T) {
 		t.Errorf("spec.content.format = %q, want %q", d.Spec.Content.Format, v1.FormatMarkdown)
 	}
 }
+
+func TestSectionValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		section v1.Section
+		wantErr string
+	}{
+		{"minimal", v1.Section{ObjectMeta: metav1.ObjectMeta{Name: "tech"}}, ""},
+		{"with parent", v1.Section{ObjectMeta: metav1.ObjectMeta{Name: "go"}, Spec: v1.SectionSpec{Parent: "tech"}}, ""},
+		{"own parent", v1.Section{ObjectMeta: metav1.ObjectMeta{Name: "loop"}, Spec: v1.SectionSpec{Parent: "loop"}}, "cannot be its own parent"},
+		{"dotted name", v1.Section{ObjectMeta: metav1.ObjectMeta{Name: "a.b"}}, "must be a DNS label"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.section
+			s.Namespace = "default"
+			expectCreate(t, &s, tt.wantErr)
+		})
+	}
+}
+
+func TestStampAndScribeValidation(t *testing.T) {
+	expectCreate(t, &v1.Stamp{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "default"}}, "")
+	expectCreate(t, &v1.Stamp{ObjectMeta: metav1.ObjectMeta{Name: "k8s.io", Namespace: "default"}}, "must be a DNS label")
+	expectCreate(t, &v1.Scribe{ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "default"},
+		Spec: v1.ScribeSpec{DisplayName: "Alice", Avatar: "print:alice", Identities: []string{"oidc:alice@example.io"}}}, "")
+	expectCreate(t, &v1.Scribe{ObjectMeta: metav1.ObjectMeta{Name: "nameless", Namespace: "default"}}, "spec.displayName")
+}
+
+func TestTypesetValidation(t *testing.T) {
+	inline := v1.TypesetSource{Inline: &v1.InlineTypesetSource{Templates: map[string]string{"layout.html": "x"}}}
+	ts := &v1.Typeset{ObjectMeta: metav1.ObjectMeta{Name: "mine", Namespace: "default"}, Spec: v1.TypesetSpec{Source: inline}}
+	expectCreate(t, ts, "")
+	if ts.Spec.ContractVersion != v1.ContractV1 {
+		t.Errorf("contractVersion = %q, want default %q", ts.Spec.ContractVersion, v1.ContractV1)
+	}
+	expectCreate(t, &v1.ClusterTypeset{ObjectMeta: metav1.ObjectMeta{Name: "shared"}, Spec: v1.TypesetSpec{Source: inline}}, "")
+	expectCreate(t, &v1.Typeset{ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"}}, "exactly one source")
+	expectCreate(t, &v1.Typeset{ObjectMeta: metav1.ObjectMeta{Name: "v9", Namespace: "default"},
+		Spec: v1.TypesetSpec{ContractVersion: "v9", Source: inline}}, "spec.contractVersion")
+}
+
+func TestGazetteTypesetFields(t *testing.T) {
+	g := validGazette("themed")
+	g.Spec.TypesetRef = &v1.TypesetRef{Name: "minimal"}
+	g.Spec.PageSize = 20
+	expectCreate(t, g, "")
+	if g.Spec.TypesetRef.Kind != v1.KindClusterTypeset {
+		t.Errorf("typesetRef.kind = %q, want default %q", g.Spec.TypesetRef.Kind, v1.KindClusterTypeset)
+	}
+	bad := validGazette("bad-page-size")
+	bad.Spec.PageSize = 1000
+	expectCreate(t, bad, "spec.pageSize")
+}

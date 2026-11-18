@@ -17,6 +17,34 @@ import (
 // +kubebuilder:validation:MaxLength=259
 type PrintRef string
 
+// TypesetKind is the kind of theme a Gazette uses.
+// +kubebuilder:validation:Enum=Typeset;ClusterTypeset
+type TypesetKind string
+
+const (
+	KindTypeset        TypesetKind = "Typeset"
+	KindClusterTypeset TypesetKind = "ClusterTypeset"
+)
+
+// TypesetRef refers to a Typeset in the Gazette's namespace or to a
+// ClusterTypeset.
+type TypesetRef struct {
+	// kind is Typeset (same namespace) or ClusterTypeset.
+	// +kubebuilder:default=ClusterTypeset
+	// +optional
+	Kind TypesetKind `json:"kind,omitempty"`
+
+	// name of the theme.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +required
+	Name string `json:"name"`
+}
+
+// DefaultPageSize is the number of Dispatches per listing page when a
+// Gazette does not set pageSize.
+const DefaultPageSize = 10
+
 // GazetteSpec defines the desired state of a Gazette.
 type GazetteSpec struct {
 	// title is the site name shown in page titles, headers and the Wire feed.
@@ -49,6 +77,22 @@ type GazetteSpec struct {
 	// +kubebuilder:validation:Pattern=`^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$`
 	// +optional
 	Language string `json:"language,omitempty"`
+
+	// typesetRef is the theme of the Gazette. Without it, the built-in theme
+	// is used.
+	// +optional
+	TypesetRef *TypesetRef `json:"typesetRef,omitempty"`
+
+	// typesetParams override the theme's params, available as .Params.
+	// +kubebuilder:validation:MaxProperties=64
+	// +optional
+	TypesetParams map[string]string `json:"typesetParams,omitempty"`
+
+	// pageSize is the number of Dispatches per listing page (default 10).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	PageSize int32 `json:"pageSize,omitempty"`
 }
 
 // GazetteStatus is the state of a Gazette as observed by press.
@@ -62,7 +106,8 @@ type GazetteStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// conditions describe the Gazette's current state. "Ready" is True when the
-	// Gazette owns its domain and can be served.
+	// Gazette owns its domain and its theme exists and parses; otherwise its
+	// reason is DomainConflict, TypesetNotFound or TemplateError.
 	// +listType=map
 	// +listMapKey=type
 	// +optional

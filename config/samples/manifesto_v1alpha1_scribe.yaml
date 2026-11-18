@@ -1,0 +1,12 @@
+apiVersion: manifesto.davy.tw/v1alpha1
+kind: Scribe
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: alice
+spec:
+  displayName: Alice
+  bio: "寫 Kubernetes 的人。"
+  identities:
+  - "oidc:alice@example.io"

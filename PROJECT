@@ -27,4 +27,43 @@ resources:
   kind: Dispatch
   path: go.pkgs.davy.tw/manifesto/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: davy.tw
+  group: manifesto
+  kind: Scribe
+  path: go.pkgs.davy.tw/manifesto/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: davy.tw
+  group: manifesto
+  kind: Section
+  path: go.pkgs.davy.tw/manifesto/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: davy.tw
+  group: manifesto
+  kind: Stamp
+  path: go.pkgs.davy.tw/manifesto/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: davy.tw
+  group: manifesto
+  kind: Typeset
+  path: go.pkgs.davy.tw/manifesto/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  domain: davy.tw
+  group: manifesto
+  kind: ClusterTypeset
+  path: go.pkgs.davy.tw/manifesto/api/v1alpha1
+  version: v1alpha1
 version: "3"
