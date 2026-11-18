@@ -24,6 +24,8 @@ import (
 var (
 	// managerImage is the manager image to be built and loaded for testing.
 	managerImage = "example.com/manifesto:v0.0.1"
+	// heraldImage is the herald (visitor site) image to be built and loaded for testing.
+	heraldImage = "example.com/manifesto-herald:v0.0.1"
 	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
 	shouldCleanupCertManager = false
 )
@@ -46,11 +48,18 @@ var _ = BeforeSuite(func() {
 	_, err := utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager image")
 
+	By("building the herald image")
+	cmd = exec.Command("make", "docker-build", "COMPONENT=herald", fmt.Sprintf("IMG=%s", heraldImage))
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the herald image")
+
 	// TODO(user): If you want to change the e2e test vendor from Kind,
 	// ensure the image is built and available, then remove the following block.
 	By("loading the manager image on Kind")
 	err = utils.LoadImageToKindClusterWithName(managerImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
+	err = utils.LoadImageToKindClusterWithName(heraldImage)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the herald image into Kind")
 
 	configureKubectlKubeRC()
 	setupCertManager()

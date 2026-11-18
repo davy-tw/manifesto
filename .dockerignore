@@ -9,6 +9,9 @@
 !**/*.go
 **/*_test.go
 
+# Re-include the built-in theme, embedded with go:embed
+!internal/render/theme/**
+
 # Re-include Go module files
 !go.mod
 !go.sum
