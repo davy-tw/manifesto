@@ -2,4 +2,8 @@
 resources:
 - manifesto_v1alpha1_gazette.yaml
 - manifesto_v1alpha1_dispatch.yaml
+- manifesto_v1alpha1_scribe.yaml
+- manifesto_v1alpha1_section.yaml
+- manifesto_v1alpha1_stamp.yaml
+- manifesto_v1alpha1_clustertypeset.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

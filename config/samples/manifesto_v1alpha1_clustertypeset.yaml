@@ -1,0 +1,33 @@
+apiVersion: manifesto.davy.tw/v1alpha1
+kind: ClusterTypeset
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: minimal
+spec:
+  contractVersion: v1
+  source:
+    inline:
+      templates:
+        layout.html: |
+          <!doctype html>
+          <html lang="{{ with .Gazette.Language }}{{ . }}{{ else }}en{{ end }}">
+          <head><meta charset="utf-8"><title>{{ block "title" . }}{{ .Gazette.Title }}{{ end }}</title>
+          <style>{{ asset "style.css" }} a { color: {{ .Params.accentColor }}; }</style></head>
+          <body><header><a href="/">{{ .Gazette.Title }}</a></header>
+          <main>{{ block "content" . }}{{ end }}</main></body></html>
+        dispatch.html: |
+          {{ define "title" }}{{ .Dispatch.Title }}{{ end }}
+          {{ define "content" }}<h1>{{ .Dispatch.Title }}</h1>{{ .Dispatch.HTML }}{{ end }}
+        index.html: |
+          {{ define "content" }}
+          {{ with .Filter }}<h1>{{ .DisplayName }}</h1>{{ end }}
+          <ul>{{ range .Dispatches }}<li><a href="{{ url .Name }}">{{ .Title }}</a></li>{{ end }}</ul>
+          {{ with .Pagination }}{{ with .PrevURL }}<a href="{{ . }}">←</a>{{ end }} {{ with .NextURL }}<a href="{{ . }}">→</a>{{ end }}{{ end }}
+          {{ end }}
+      assets:
+        style.css: |
+          body { max-width: 42rem; margin: auto; font-family: system-ui, sans-serif; }
+  params:
+    accentColor: "#3b82f6"

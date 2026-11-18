@@ -4,9 +4,12 @@ metadata:
   labels:
     app.kubernetes.io/name: manifesto
     app.kubernetes.io/managed-by: kustomize
+    section.manifesto.davy.tw/name: tech
+    stamp.manifesto.davy.tw/kubernetes: ""
   name: hello-k8s
 spec:
   gazetteRef: alice-notes
+  scribeRef: alice
   title: "Hello K8s"
   summary: "第一篇文章"
   state: Published

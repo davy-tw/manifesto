@@ -80,6 +80,13 @@ spec:
                 maxLength: 259
                 pattern: ^print:[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
+              pageSize:
+                description: pageSize is the number of Dispatches per listing page
+                  (default 10).
+                format: int32
+                maximum: 100
+                minimum: 1
+                type: integer
               tagline:
                 description: tagline is a short line shown under the title.
                 maxLength: 512
@@ -90,6 +97,33 @@ spec:
                 maxLength: 256
                 minLength: 1
                 type: string
+              typesetParams:
+                additionalProperties:
+                  type: string
+                description: typesetParams override the theme's params, available
+                  as .Params.
+                maxProperties: 64
+                type: object
+              typesetRef:
+                description: |-
+                  typesetRef is the theme of the Gazette. Without it, the built-in theme
+                  is used.
+                properties:
+                  kind:
+                    default: ClusterTypeset
+                    description: kind is Typeset (same namespace) or ClusterTypeset.
+                    enum:
+                    - Typeset
+                    - ClusterTypeset
+                    type: string
+                  name:
+                    description: name of the theme.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
             required:
             - domain
             - title
@@ -100,7 +134,8 @@ spec:
               conditions:
                 description: |-
                   conditions describe the Gazette's current state. "Ready" is True when the
-                  Gazette owns its domain and can be served.
+                  Gazette owns its domain and its theme exists and parses; otherwise its
+                  reason is DomainConflict, TypesetNotFound or TemplateError.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

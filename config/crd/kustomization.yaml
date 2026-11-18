@@ -4,6 +4,11 @@
 resources:
 - bases/manifesto.davy.tw_gazettes.yaml
 - bases/manifesto.davy.tw_dispatches.yaml
+- bases/manifesto.davy.tw_scribes.yaml
+- bases/manifesto.davy.tw_sections.yaml
+- bases/manifesto.davy.tw_stamps.yaml
+- bases/manifesto.davy.tw_typesets.yaml
+- bases/manifesto.davy.tw_clustertypesets.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
