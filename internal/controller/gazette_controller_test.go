@@ -44,7 +44,10 @@ var _ = Describe("Gazette Controller", func() {
 						Name:      resourceName,
 						Namespace: resourceNamespace,
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: manifestov1alpha1.GazetteSpec{
+						Title:  "Test",
+						Domain: "test.example.io",
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
