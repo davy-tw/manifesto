@@ -1,8 +1,13 @@
+{{ define "title" }}{{ with .Filter }}{{ .DisplayName }} · {{ end }}{{ .Gazette.Title }}{{ end }}
 {{ define "content" }}
+{{ with .Filter }}
+<h1>{{ .DisplayName }}</h1>
+{{ with .Description }}<p class="description">{{ . }}</p>{{ end }}
+{{ end }}
 <ul class="dispatches">
 {{ range .Dispatches }}
 <li>
-<a href="{{ url .Name }}">{{ .Title }}</a>
+<a href="{{ .Path }}">{{ .Title }}</a>
 {{ with .PublishedAt }}<time datetime="{{ date "2006-01-02T15:04:05Z07:00" . }}">{{ date "2006-01-02" . }}</time>{{ end }}
 {{ with .Summary }}<p>{{ truncate 200 . }}</p>{{ end }}
 </li>
@@ -10,4 +15,11 @@
 <li>No dispatches yet.</li>
 {{ end }}
 </ul>
+{{ with .Pagination }}{{ if gt .Pages 1 }}
+<nav class="pagination">
+{{ with .PrevURL }}<a rel="prev" href="{{ . }}">← Newer</a>{{ end }}
+<span>{{ .Page }} / {{ .Pages }}</span>
+{{ with .NextURL }}<a rel="next" href="{{ . }}">Older →</a>{{ end }}
+</nav>
+{{ end }}{{ end }}
 {{ end }}

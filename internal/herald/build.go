@@ -99,7 +99,7 @@ func (b *Builder) buildSite(g *v1.Gazette, dispatches []*v1.Dispatch, old *site)
 				}
 			}
 			s.posts[d.Name] = b.renderEntry(key, prevEntry, func() ([]byte, error) {
-				return render.DispatchPage(b.Theme, g, d)
+				return render.NewSite(b.Theme, g, nil, render.Taxonomy{}).DispatchPage(d)
 			}, log.WithValues("dispatch", d.Name))
 			if d.Status.Phase == v1.PhasePublished {
 				listed = append(listed, d)
@@ -126,7 +126,7 @@ func (b *Builder) buildSite(g *v1.Gazette, dispatches []*v1.Dispatch, old *site)
 		prevIndex = &old.index
 	}
 	s.index = b.renderEntry(strings.Join(parts, "/"), prevIndex, func() ([]byte, error) {
-		return render.IndexPage(b.Theme, g, listed)
+		return render.NewSite(b.Theme, g, nil, render.Taxonomy{}).ListPage(listed, nil, nil)
 	}, log.WithValues("page", "index"))
 	return s
 }

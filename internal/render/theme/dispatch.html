@@ -2,7 +2,12 @@
 {{ define "content" }}
 <article>
 <h1>{{ .Dispatch.Title }}</h1>
+<p class="meta">
 {{ with .Dispatch.PublishedAt }}<time datetime="{{ date "2006-01-02T15:04:05Z07:00" . }}">{{ date "2006-01-02" . }}</time>{{ end }}
+{{ with .Dispatch.Scribe }} · <a href="{{ .Path }}">{{ .DisplayName }}</a>{{ end }}
+{{ with .Dispatch.Section }} · <a href="{{ .Path }}">{{ .DisplayName }}</a>{{ end }}
+</p>
 <div class="body">{{ .Dispatch.HTML }}</div>
+{{ with .Dispatch.Stamps }}<ul class="stamps">{{ range . }}<li><a href="{{ .Path }}">{{ .DisplayName }}</a></li>{{ end }}</ul>{{ end }}
 </article>
 {{ end }}

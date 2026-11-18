@@ -27,12 +27,12 @@ func applyStatus(ctx context.Context, c client.Client, kind string, obj client.O
 	u := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": v1.GroupVersion.String(),
 		"kind":       kind,
-		"metadata": map[string]any{
-			"name":      obj.GetName(),
-			"namespace": obj.GetNamespace(),
-		},
-		"status": s,
+		"metadata":   map[string]any{"name": obj.GetName()},
+		"status":     s,
 	}}
+	if ns := obj.GetNamespace(); ns != "" {
+		u.SetNamespace(ns)
+	}
 	return c.Status().Apply(ctx, client.ApplyConfigurationFromUnstructured(u),
 		client.FieldOwner(v1.FieldManagerPress), client.ForceOwnership)
 }

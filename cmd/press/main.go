@@ -173,19 +173,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.GazetteReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "gazette")
-		os.Exit(1)
-	}
-	if err := (&controller.DispatchReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Clock:  clock.RealClock{},
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "dispatch")
+	if err := controller.Setup(mgr, clock.RealClock{}); err != nil {
+		setupLog.Error(err, "Failed to set up controllers")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
