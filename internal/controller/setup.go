@@ -32,8 +32,9 @@ const (
 	typesetIndex = "spec.typesetRef"
 )
 
-// Setup registers press's field indexes and controllers with mgr.
-func Setup(mgr ctrl.Manager, clk clock.PassiveClock) error {
+// Setup registers press's field indexes and controllers with mgr. Routing
+// is optional; its zero value leaves routing to the cluster operator.
+func Setup(mgr ctrl.Manager, clk clock.PassiveClock, routing Routing) error {
 	ctx := context.Background()
 	idx := mgr.GetFieldIndexer()
 	if err := idx.IndexField(ctx, &v1.Dispatch{}, gazetteRefIndex, func(o client.Object) []string {
@@ -65,7 +66,7 @@ func Setup(mgr ctrl.Manager, clk clock.PassiveClock) error {
 
 	c, scheme := mgr.GetClient(), mgr.GetScheme()
 	for _, r := range []interface{ SetupWithManager(ctrl.Manager) error }{
-		&GazetteReconciler{Client: c, Scheme: scheme},
+		&GazetteReconciler{Client: c, Scheme: scheme, Routing: routing},
 		&DispatchReconciler{Client: c, Scheme: scheme, Clock: clk},
 		&SectionReconciler{Client: c, Scheme: scheme},
 		&TypesetReconciler{Client: c, Scheme: scheme},

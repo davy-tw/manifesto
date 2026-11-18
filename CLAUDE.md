@@ -67,16 +67,16 @@ Manifesto 是完全 Kubernetes 原生的部落格引擎：內容都是 CRD，邏
 - 渲染、狀態轉換規則用單元測試（table-driven）
 - 完成任何變更前執行 `make test` 和 `make lint`
 
-## 目前里程碑：M1（MVP）
+## 里程碑
 
-目標：`kubectl apply` 一篇 Dispatch，排程時間到自動發布，瀏覽器打開就看得到。
+M1（MVP）與 M2（內容與網站）已完成。程式位置：
 
-1. kubebuilder 專案骨架；`cmd/press`、`cmd/herald`、`internal/render`
-2. `Gazette`、`Dispatch` CRD（含 CEL 驗證、shortNames、printer columns）
-3. press：Dispatch 狀態機、`gazetteRef`/`scribeRef` 檢查、`Rendered` condition
-4. herald：informer、依 Host 找 Gazette、記憶體內預先渲染、內建預設主題、ETag。快取 key 包含 Dispatch 與 Gazette 的 resourceVersion（Gazette 的標題、logo 也會影響頁面）；M2 加入 Typeset 後再把它的 resourceVersion 加進 key
-5. 測試：狀態機 envtest、渲染單元測試
+- press：`internal/controller`（`setup.go` 註冊 index 與所有 controller；狀態機 `phase.go`；主題解析 `theme.go`；路由 `routing.go`）
+- 網域歸屬（press 與 herald 共用）：`internal/domain`
+- 渲染與 view model：`internal/render`（內建主題在 `theme/`）
+- herald：`internal/herald`（`build.go` 快照、`feed.go` Wire 與 sitemap、`handler.go` 路由）
+- 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 上的 E2E 在 `test/e2e`；envtest 用的第三方 CRD 在 `test/crds`
 
-M1 已完成。程式位置：狀態機 `internal/controller/phase.go`、網域歸屬（press 與 herald 共用）`internal/domain`、herald 快照與路由 `internal/herald`、內建主題 `internal/render/theme/`、端到端測試 `internal/herald/milestone_test.go`。
+路由慣例：press 以 `--gateway-name` 啟用；每個擁有網域的 Gazette 在自己的 namespace 得到 `manifesto-<gazette>` 的 ListenerSet、HTTPRoute、`-redirect` HTTPRoute 與 Certificate（ownerReference 回收，不用 finalizer），herald 的 namespace 有每個 namespace 一個的 ReferenceGrant。
 
-M1 範圍外（之後的里程碑）：Section/Stamp/Scribe/Typeset CRD、HTTPRoute 與 cert-manager、Print/Archive/darkroom、desk、Edition、mfctl。
+下一個里程碑：M3（媒體）— Print、Archive / ClusterArchive、darkroom（先 PVC driver，再 S3）。範圍外：desk、Edition、mfctl。

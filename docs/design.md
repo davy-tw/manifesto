@@ -210,7 +210,7 @@ press 只決定狀態，不產生任何檔案；herald 在記憶體中預先渲�
 **publishAt 的規則**
 
 - `publishAt` 是「可見狀態的解禁時間」，同樣適用於 Published 和 Unlisted；Draft 和 Retracted 會忽略它
-- 文章第一次變成可見時寫入 `status.publishedAt`，之後狀態來回切換也不會改變
+- 文章第一次變成可見時寫入 `status.publishedAt`，之後狀態來回切換也不會改變。`publishAt` 已過就寫入 `publishAt`（補登或 press 停機後補發的文章保留原定日期），否則寫入當下時間
 - `publishedAt` 寫入後就不再看 `publishAt`：把已發布文章的 `publishAt` 改到未來，不會把文章撤回 Embargoed。要下架請改成 Draft 或 Retracted
 
 **排程機制**
@@ -234,9 +234,14 @@ press 不產生渲染結果，但會用共用的 `internal/render` 試渲染一�
 
 **Gazette reconcile**
 
-- 依 `spec.domain` 建立 Gateway API 的 `HTTPRoute`，指向 herald
-- 透過 cert-manager 取得 TLS 憑證
-- 不同 namespace 的 Gazette 搶同一個網域時，最早建立的生效，其他的把 status 設成 `DomainConflict`
+- 不同 namespace 的 Gazette 搶同一個網域時，最早建立的生效，其他的把 status 設成 `DomainConflict`；同時間建立的依 namespace、名稱排序。規則放在 `internal/domain`，press 與 herald 共用
+- 主題：`typesetRef` 找不到時 `Ready` 為 `TypesetNotFound`，暫用內建主題；解析失敗為 `TemplateError`
+- **路由**（press 以 `--gateway-name`/`--gateway-namespace` 啟用，未設定就交給叢集管理者）：擁有網域的 Gazette 在自己的 namespace 得到以下物件，全部以 ownerReference 掛在 Gazette 下，刪除時由 K8s 回收，不需要 finalizer：
+  - `ListenerSet` `manifesto-<gazette>`：掛到共用 Gateway，含該網域的 HTTPS（443）與 HTTP（80）listener。Gateway 必須以 `spec.allowedListeners` 允許這些 namespace
+  - `HTTPRoute` `manifesto-<gazette>`：HTTPS listener 的流量導向 herald；`manifesto-<gazette>-redirect`：HTTP 以 301 轉址到 HTTPS
+  - cert-manager `Certificate` `manifesto-<gazette>`（設定 `--cluster-issuer` 時）：簽發 Secret `manifesto-<gazette>-tls`。HTTP-01 驗證要經過每個 ListenerSet，建議用 DNS-01 的 ClusterIssuer
+  - herald 所在 namespace 的 `ReferenceGrant` `manifesto-<namespace>`：允許該 namespace 的 HTTPRoute 指向 herald 的 Service；namespace 沒有 Gazette 時移除
+  - `Routed` condition 反映 Gateway 實作回報的狀態：ListenerSet `Programmed` 且 HTTPRoute 被 ListenerSet 接受時為 True
 
 **herald 的路由**
 
@@ -244,21 +249,25 @@ herald 用 informer 監看 Gazette、Dispatch、Scribe、Section、Stamp、Types
 
 | 路徑 | 內容 |
 |---|---|
-| `/` | 文章列表（分頁） |
+| `/`、`/page/{n}` | 文章列表，每頁 `spec.pageSize` 篇（預設 10） |
 | `/posts/{name}` | 文章內頁 |
-| `/sections/{name}`、`/stamps/{name}`、`/scribes/{name}` | 篩選列表 |
-| `/wire.xml`、`/sitemap.xml` | RSS 與 SEO |
+| `/sections/{name}`、`/stamps/{name}`、`/scribes/{name}`（各自加 `/page/{n}`） | 篩選列表；Section 包含所有子孫 Section 的文章 |
+| `/wire.xml` | RSS 2.0，最新 20 篇 Published；作者用 `dc:creator`，Section 與 Stamp 為 `category` |
+| `/sitemap.xml` | 首頁、所有列表頁與 Published 文章（不含 Unlisted） |
+
+- 分類、標籤、作者只要有對應的 CRD，或有 Published 文章用到，就有列表頁；其他回 404
 
 - Markdown 用 goldmark 轉換，再用 bluemonday 清理 HTML，避免 XSS
-- ETag 由快取 key 的 Dispatch、Gazette、Typeset resourceVersion 組合而成，重複請求回 304
-- **記憶體內預先渲染**：herald 收到 informer 的 Add 或 Update 事件時，就在背景算好 HTML 放進快取。快取 key 包含 Dispatch、Gazette、Typeset 的 resourceVersion，任何一個改變就重算
+- **記憶體內預先渲染**：herald 收到 informer 事件時，就在背景重建快照，算好 HTML 放進快取。快取 key 包含 Dispatch、Gazette、Typeset，以及同 namespace 所有 Section、Stamp、Scribe 的 resourceVersion，任何一個改變就重算
+- ETag 由快取 key 雜湊而成，重複請求回 304
+- 主題解析失敗時沿用上一個可用版本；從來沒有成功過，HTML 頁面回 503（Wire 與 sitemap 照常）
 - **渲染結果不存進 `status`**：否則物件大小會翻倍，換主題時也得重寫所有文章；herald 保持唯讀，`status` 只放 press 寫入的 `Rendered` condition
 
 **Typeset 模板**
 
 - 使用 Go `html/template`：依上下文自動跳脫，模板只能呼叫系統提供的固定 FuncMap（日期格式化、`asset`、`printurl`、`url`、`truncate` 等），不開放自訂函式
 - 每種頁面由 `layout.html` 加上對應的頁面模板組成，頁面填入 `content` block
-- view model：`.Gazette`、`.Dispatch`、`.Dispatches`、`.Pagination`、`.Params`；不相容的變更就升 `contractVersion`
+- view model：`.Gazette`、`.Dispatch`、`.Dispatches`、`.Filter`、`.Pagination`、`.Params`；文章有 `.Section`、`.Stamps`、`.Scribe`、`.Path`。`.Params` 是主題的 `params` 被 Gazette 的 `typesetParams` 覆蓋後的結果。不相容的變更就升 `contractVersion`
 - 整個主題 inline 在一個資源裡，更新是原子的；用 `mfctl typeset build ./my-theme` 把資料夾打包成 YAML
 - press 解析模板並把錯誤寫進 `status.conditions`；新版解析失敗時，herald 繼續用上一個可用版本
 
@@ -342,8 +351,8 @@ status:
 
 **里程碑**
 
-1. **M1 MVP**：專案骨架、Gazette + Dispatch CRD、press 狀態機與 `Rendered` condition、herald + 內建預設主題、envtest 與單元測試
-2. **M2 內容與網站**：Section、Stamp、Scribe、Typeset / ClusterTypeset、Wire 與 sitemap、分頁與篩選、HTTPRoute + cert-manager
+1. **M1 MVP**（已完成）：專案骨架、Gazette + Dispatch CRD、press 狀態機與 `Rendered` condition、herald + 內建預設主題、envtest 與單元測試
+2. **M2 內容與網站**（已完成）：Section、Stamp、Scribe、Typeset / ClusterTypeset、Wire 與 sitemap、分頁與篩選、HTTPRoute + cert-manager
 3. **M3 媒體**：Print、Archive、darkroom（先 PVC driver，再 S3）
 4. **M4 管理介面**：desk
 5. **M5 補完**：Edition、mfctl、Helm chart
