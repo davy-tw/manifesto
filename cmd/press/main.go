@@ -84,6 +84,15 @@ func main() {
 	flag.StringVar(&routing.Gateway.Name, "gateway-name", "",
 		"Gateway that each Gazette's ListenerSet attaches to. Leave empty to manage routing yourself.")
 	flag.StringVar(&routing.Gateway.Namespace, "gateway-namespace", "", "Namespace of --gateway-name.")
+	var mode string
+	flag.StringVar(&mode, "routing-mode", string(controller.ModeListenerSet),
+		"How HTTPRoutes reach the Gateway: \"listenerset\" (a ListenerSet with its own listeners and certificate per "+
+			"Gazette) or \"gateway\" (attach to the Gateway's own listeners, e.g. for the Traefik bundled with k3s).")
+	flag.StringVar(&routing.GatewaySection, "gateway-section", "",
+		"In gateway mode, the Gateway listener HTTPRoutes attach to (sectionName). Empty attaches to all listeners.")
+	var httpsPort, httpPort int
+	flag.IntVar(&httpsPort, "listener-https-port", 443, "In listenerset mode, the port of each HTTPS listener.")
+	flag.IntVar(&httpPort, "listener-http-port", 80, "In listenerset mode, the port of each HTTP listener.")
 	flag.StringVar(&heraldService, "herald-service", "manifesto-system/manifesto-herald",
 		"herald's Service, as namespace/name, that every HTTPRoute sends traffic to.")
 	var heraldPort int
@@ -99,6 +108,13 @@ func main() {
 		os.Exit(1)
 	}
 	routing.HeraldPort = int32(heraldPort) // #nosec G115 -- a port number
+	routing.HTTPSPort = int32(httpsPort)   // #nosec G115 -- a port number
+	routing.HTTPPort = int32(httpPort)     // #nosec G115 -- a port number
+	routing.Mode = controller.RoutingMode(mode)
+	if routing.Mode != controller.ModeListenerSet && routing.Mode != controller.ModeGateway {
+		setupLog.Error(nil, "--routing-mode must be listenerset or gateway", "value", mode)
+		os.Exit(1)
+	}
 	if routing.Enabled() && routing.Gateway.Namespace == "" {
 		setupLog.Error(nil, "--gateway-namespace is required with --gateway-name")
 		os.Exit(1)

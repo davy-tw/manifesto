@@ -47,11 +47,16 @@ herald 的 Service 是 `manifesto-system/manifesto-herald`。
 
 | 參數 | 說明 |
 |---|---|
-| `--gateway-name`、`--gateway-namespace` | 每個 Gazette 的 `ListenerSet` 要掛上的共用 Gateway |
+| `--routing-mode` | `listenerset`（預設）：每個 Gazette 一個 ListenerSet 與憑證；`gateway`：HTTPRoute 直接掛到 Gateway 的 listener，TLS 由 Gateway 負責 |
+| `--gateway-name`、`--gateway-namespace` | 共用的 Gateway |
+| `--gateway-section` | `gateway` 模式下要掛的 listener 名稱（選用） |
+| `--listener-https-port`、`--listener-http-port` | `listenerset` 模式下 listener 的 port，預設 443 與 80 |
 | `--cluster-issuer` | 選用。cert-manager 的 ClusterIssuer；設定後 press 替每個網域建立 `Certificate` |
 | `--herald-service`、`--herald-port` | herald 的 Service，預設 `manifesto-system/manifesto-herald:80` |
 
-需求：
+**k3s（內建 Traefik）請用 `gateway` 模式，步驟見 [`docs/k3s.md`](docs/k3s.md)。**
+
+`listenerset` 模式的需求：
 
 - Gateway API v1.6 以上的標準 CRD（含 `ListenerSet`），以及支援 ListenerSet 的 Gateway 實作
 - 共用的 Gateway 要允許 Gazette 所在 namespace 的 ListenerSet，例如 `spec.allowedListeners.namespaces.from: All`

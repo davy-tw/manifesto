@@ -116,7 +116,10 @@ func (r *GazetteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	b := ctrl.NewControllerManagedBy(mgr)
 	if r.Routing.Enabled() {
 		// Follow what the Gateway implementation reports, and repair edits.
-		b = b.Owns(&gatewayv1.ListenerSet{}).Owns(&gatewayv1.HTTPRoute{})
+		b = b.Owns(&gatewayv1.HTTPRoute{})
+		if r.Routing.usesListenerSets() {
+			b = b.Owns(&gatewayv1.ListenerSet{})
+		}
 	}
 	return b.
 		For(&v1.Gazette{}).
