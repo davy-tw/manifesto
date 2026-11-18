@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -25,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	manifestov1alpha1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 	"go.pkgs.davy.tw/manifesto/internal/controller"
@@ -40,6 +42,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(manifestov1alpha1.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -76,8 +79,30 @@ func main() {
 	opts := zap.Options{
 		Development: true,
 	}
+	var routing controller.Routing
+	var heraldService string
+	flag.StringVar(&routing.Gateway.Name, "gateway-name", "",
+		"Gateway that each Gazette's ListenerSet attaches to. Leave empty to manage routing yourself.")
+	flag.StringVar(&routing.Gateway.Namespace, "gateway-namespace", "", "Namespace of --gateway-name.")
+	flag.StringVar(&heraldService, "herald-service", "manifesto-system/manifesto-herald",
+		"herald's Service, as namespace/name, that every HTTPRoute sends traffic to.")
+	var heraldPort int
+	flag.IntVar(&heraldPort, "herald-port", 80, "Port of --herald-service.")
+	flag.StringVar(&routing.ClusterIssuer, "cluster-issuer", "",
+		"cert-manager ClusterIssuer for each Gazette's certificate. Leave empty to provide the TLS Secrets yourself.")
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+	if ns, name, ok := strings.Cut(heraldService, "/"); ok {
+		routing.Herald.Namespace, routing.Herald.Name = ns, name
+	} else {
+		setupLog.Error(nil, "--herald-service must be namespace/name", "value", heraldService)
+		os.Exit(1)
+	}
+	routing.HeraldPort = int32(heraldPort) // #nosec G115 -- a port number
+	if routing.Enabled() && routing.Gateway.Namespace == "" {
+		setupLog.Error(nil, "--gateway-namespace is required with --gateway-name")
+		os.Exit(1)
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
@@ -173,7 +198,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := controller.Setup(mgr, clock.RealClock{}); err != nil {
+	if err := controller.Setup(mgr, clock.RealClock{}, routing); err != nil {
 		setupLog.Error(err, "Failed to set up controllers")
 		os.Exit(1)
 	}

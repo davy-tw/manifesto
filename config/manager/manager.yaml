@@ -63,6 +63,12 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          # Uncomment to let press expose each Gazette through Gateway API:
+          # a ListenerSet on this Gateway, HTTPRoutes to herald and, with
+          # --cluster-issuer, a cert-manager Certificate per domain.
+          # - --gateway-name=public
+          # - --gateway-namespace=infra
+          # - --cluster-issuer=letsencrypt
         image: controller:latest
         name: manager
         ports:

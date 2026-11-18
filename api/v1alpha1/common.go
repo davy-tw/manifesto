@@ -23,6 +23,9 @@ const (
 	ConditionReady = "Ready"
 	// ConditionRendered reports whether press could trial-render a Dispatch.
 	ConditionRendered = "Rendered"
+	// ConditionRouted reports whether the Gateway serves a Gazette's domain.
+	// It is only set when press manages routing.
+	ConditionRouted = "Routed"
 )
 
 // Condition reasons shared by Manifesto resources.
@@ -38,6 +41,8 @@ const (
 	ReasonParentNotFound   = "ParentNotFound"
 	ReasonParentCycle      = "ParentCycle"
 	ReasonReconcileFailing = "ReconcileFailing"
+	ReasonProgrammed       = "Programmed"
+	ReasonRoutePending     = "RoutePending"
 )
 
 // FieldManagerPress is the Server-Side Apply field manager used by press.

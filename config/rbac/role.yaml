@@ -5,6 +5,30 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  - listenersets
+  - referencegrants
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
   - manifesto.davy.tw
   resources:
   - clustertypesets

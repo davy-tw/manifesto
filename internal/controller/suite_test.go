@@ -15,6 +15,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -23,6 +26,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	manifestov1alpha1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
@@ -30,6 +34,14 @@ import (
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
+
+// testRouting is the routing configuration press runs with in these tests.
+var testRouting = Routing{
+	Gateway:       types.NamespacedName{Namespace: "infra", Name: "public"},
+	Herald:        types.NamespacedName{Namespace: "manifesto-system", Name: "manifesto-herald"},
+	HeraldPort:    80,
+	ClusterIssuer: "letsencrypt",
+}
 
 var (
 	ctx       context.Context
@@ -54,11 +66,15 @@ var _ = BeforeSuite(func() {
 	err = manifestov1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	Expect(gatewayv1.Install(scheme.Scheme)).To(Succeed())
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "..", "config", "crd", "bases"),
+			filepath.Join("..", "..", "test", "crds"),
+		},
 		ErrorIfCRDPathMissing: true,
 	}
 
@@ -82,7 +98,8 @@ var _ = BeforeSuite(func() {
 		Metrics: metricsserver.Options{BindAddress: "0"},
 	})
 	Expect(err).NotTo(HaveOccurred())
-	Expect(Setup(mgr, nil)).To(Succeed())
+	Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testRouting.Herald.Namespace}})).To(Succeed())
+	Expect(Setup(mgr, nil, testRouting)).To(Succeed())
 	go func() {
 		defer GinkgoRecover()
 		Expect(mgr.Start(ctx)).To(Succeed())

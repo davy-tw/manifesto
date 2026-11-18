@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,6 +24,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 	"go.pkgs.davy.tw/manifesto/internal/domain"
@@ -30,12 +32,12 @@ import (
 )
 
 // GazetteReconciler reports whether each Gazette owns its domain and has a
-// usable theme.
-//
-// TODO(M2): create the HTTPRoute and TLS certificate for the domain.
+// usable theme, and, when Routing is enabled, exposes the domain through
+// Gateway API.
 type GazetteReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme  *runtime.Scheme
+	Routing Routing
 }
 
 // +kubebuilder:rbac:groups=manifesto.davy.tw,resources=gazettes,verbs=get;list;watch
@@ -48,6 +50,11 @@ type GazetteReconciler struct {
 func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var g v1.Gazette
 	if err := r.Get(ctx, req.NamespacedName, &g); err != nil {
+		if apierrors.IsNotFound(err) && r.Routing.Enabled() {
+			// The routing objects go with the Gazette (owner references);
+			// only the namespace's ReferenceGrant may need removing.
+			return ctrl.Result{}, r.reconcileReferenceGrant(ctx, req.Namespace)
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -68,8 +75,9 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Message:            fmt.Sprintf("Serving %s", g.Spec.Domain),
 		ObservedGeneration: g.Generation,
 	}
+	ownsDomain := owner == nil || (owner.Namespace == g.Namespace && owner.Name == g.Name)
 	switch {
-	case owner != nil && (owner.Namespace != g.Namespace || owner.Name != g.Name):
+	case !ownsDomain:
 		ready.Status = metav1.ConditionFalse
 		ready.Reason = v1.ReasonDomainConflict
 		ready.Message = fmt.Sprintf("Domain %s is already served by Gazette %s/%s", g.Spec.Domain, owner.Namespace, owner.Name)
@@ -85,6 +93,16 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Conditions:         append([]metav1.Condition(nil), g.Status.Conditions...),
 	}
 	meta.SetStatusCondition(&status.Conditions, ready)
+	if r.Routing.Enabled() {
+		if err := r.reconcileReferenceGrant(ctx, g.Namespace); err != nil {
+			return ctrl.Result{}, err
+		}
+		routed, err := r.reconcileRouting(ctx, &g, ownsDomain)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		meta.SetStatusCondition(&status.Conditions, routed)
+	}
 	if equality.Semantic.DeepEqual(status, g.Status) {
 		return ctrl.Result{}, nil
 	}
@@ -95,7 +113,12 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // indexes it relies on are registered by Setup.
 func (r *GazetteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	generation := builder.WithPredicates(predicate.GenerationChangedPredicate{})
-	return ctrl.NewControllerManagedBy(mgr).
+	b := ctrl.NewControllerManagedBy(mgr)
+	if r.Routing.Enabled() {
+		// Follow what the Gateway implementation reports, and repair edits.
+		b = b.Owns(&gatewayv1.ListenerSet{}).Owns(&gatewayv1.HTTPRoute{})
+	}
+	return b.
 		For(&v1.Gazette{}).
 		// A Gazette appearing, leaving or changing domain can change which of
 		// its peers owns a domain, so requeue every Gazette on the old and new
