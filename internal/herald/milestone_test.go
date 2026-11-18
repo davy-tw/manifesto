@@ -64,10 +64,7 @@ func TestMilestone1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (&controller.GazetteReconciler{Client: mgr.GetClient(), Scheme: scheme}).SetupWithManager(mgr); err != nil {
-		t.Fatal(err)
-	}
-	if err := (&controller.DispatchReconciler{Client: mgr.GetClient(), Scheme: scheme}).SetupWithManager(mgr); err != nil {
+	if err := controller.Setup(mgr, nil); err != nil {
 		t.Fatal(err)
 	}
 	go func() { _ = mgr.Start(ctx) }()

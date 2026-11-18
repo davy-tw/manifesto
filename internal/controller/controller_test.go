@@ -125,16 +125,16 @@ var _ = Describe("Dispatch controller", func() {
 		Eventually(fetch(d), timeout, interval).Should(WithTransform(phaseOf, Equal(v1.PhasePublished)))
 		first := d.Status.PublishedAt.DeepCopy()
 
-		d.Spec.State = v1.StateDraft
-		Expect(k8sClient.Update(ctx, d)).To(Succeed())
+		update(d, func(d *v1.Dispatch) { d.Spec.State = v1.StateDraft })
 		Eventually(fetch(d), timeout, interval).Should(WithTransform(phaseOf, Equal(v1.PhaseDraft)))
 		Expect(d.Status.PublishedAt.Equal(first)).To(BeTrue())
 
 		// A future publishAt no longer embargoes a Dispatch that has been visible.
 		future := metav1.NewTime(time.Now().Add(time.Hour))
-		d.Spec.State = v1.StatePublished
-		d.Spec.PublishAt = &future
-		Expect(k8sClient.Update(ctx, d)).To(Succeed())
+		update(d, func(d *v1.Dispatch) {
+			d.Spec.State = v1.StatePublished
+			d.Spec.PublishAt = &future
+		})
 		Eventually(fetch(d), timeout, interval).Should(WithTransform(phaseOf, Equal(v1.PhasePublished)))
 		Expect(d.Status.PublishedAt.Equal(first)).To(BeTrue())
 		Expect(d.Status.ObservedGeneration).To(Equal(d.Generation))

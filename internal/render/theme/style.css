@@ -7,3 +7,8 @@ time { color: #6b7280; font-size: 0.9rem; }
 .dispatches li { margin-bottom: 1.5rem; }
 pre { overflow-x: auto; background: #f3f4f6; padding: 1rem; }
 img { max-width: 100%; }
+.meta { color: #6b7280; font-size: 0.9rem; }
+.meta a { color: inherit; }
+.stamps { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.stamps a { font-size: 0.85rem; padding: 0.1rem 0.5rem; border: 1px solid #d1d5db; border-radius: 999px; text-decoration: none; color: inherit; }
+.pagination { display: flex; gap: 1rem; justify-content: center; color: #6b7280; }

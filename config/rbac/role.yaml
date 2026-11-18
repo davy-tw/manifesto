@@ -7,8 +7,13 @@ rules:
 - apiGroups:
   - manifesto.davy.tw
   resources:
+  - clustertypesets
   - dispatches
   - gazettes
+  - scribes
+  - sections
+  - stamps
+  - typesets
   verbs:
   - get
   - list
@@ -16,8 +21,11 @@ rules:
 - apiGroups:
   - manifesto.davy.tw
   resources:
+  - clustertypesets/status
   - dispatches/status
   - gazettes/status
+  - sections/status
+  - typesets/status
   verbs:
   - get
   - patch

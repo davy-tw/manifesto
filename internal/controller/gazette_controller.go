@@ -16,10 +16,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
@@ -27,12 +29,10 @@ import (
 	"go.pkgs.davy.tw/manifesto/internal/render"
 )
 
-// domainIndex indexes Gazettes (across namespaces) by normalized spec.domain.
-const domainIndex = "spec.domain"
-
-// GazetteReconciler reports whether each Gazette owns its domain.
+// GazetteReconciler reports whether each Gazette owns its domain and has a
+// usable theme.
 //
-// TODO(M2): create the HTTPRoute and cert-manager Certificate for the domain.
+// TODO(M2): create the HTTPRoute and TLS certificate for the domain.
 type GazetteReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -43,7 +43,8 @@ type GazetteReconciler struct {
 
 // Reconcile computes the status of one Gazette. When Gazettes in different
 // namespaces claim the same domain, the oldest one is Ready and the others
-// report DomainConflict.
+// report DomainConflict. A missing theme reports TypesetNotFound (the
+// built-in theme is used meanwhile) and a broken one TemplateError.
 func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var g v1.Gazette
 	if err := r.Get(ctx, req.NamespacedName, &g); err != nil {
@@ -55,6 +56,10 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 	owner := domain.Owners(peers.Items)[domain.Normalize(g.Spec.Domain)]
+	theme, err := resolveTheme(ctx, r.Client, &g)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	ready := metav1.Condition{
 		Type:               v1.ConditionReady,
@@ -63,10 +68,15 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Message:            fmt.Sprintf("Serving %s", g.Spec.Domain),
 		ObservedGeneration: g.Generation,
 	}
-	if owner != nil && (owner.Namespace != g.Namespace || owner.Name != g.Name) {
+	switch {
+	case owner != nil && (owner.Namespace != g.Namespace || owner.Name != g.Name):
 		ready.Status = metav1.ConditionFalse
 		ready.Reason = v1.ReasonDomainConflict
 		ready.Message = fmt.Sprintf("Domain %s is already served by Gazette %s/%s", g.Spec.Domain, owner.Namespace, owner.Name)
+	case theme.err != nil:
+		ready.Status = metav1.ConditionFalse
+		ready.Reason = theme.reason
+		ready.Message = render.TruncateMessage(theme.err.Error())
 	}
 
 	status := v1.GazetteStatus{
@@ -81,12 +91,10 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, applyStatus(ctx, r.Client, "Gazette", &g, &status)
 }
 
-// SetupWithManager sets up the controller with the Manager.
+// SetupWithManager sets up the controller with the Manager. The field
+// indexes it relies on are registered by Setup.
 func (r *GazetteReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1.Gazette{}, domainIndex,
-		func(o client.Object) []string { return []string{domain.Normalize(o.(*v1.Gazette).Spec.Domain)} }); err != nil {
-		return err
-	}
+	generation := builder.WithPredicates(predicate.GenerationChangedPredicate{})
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.Gazette{}).
 		// A Gazette appearing, leaving or changing domain can change which of
@@ -104,8 +112,19 @@ func (r *GazetteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				r.enqueuePeers(ctx, q, e.Object)
 			},
 		}).
+		Watches(&v1.Typeset{}, handler.EnqueueRequestsFromMapFunc(r.gazettesOfTypeset), generation).
+		Watches(&v1.ClusterTypeset{}, handler.EnqueueRequestsFromMapFunc(r.gazettesOfTypeset), generation).
 		Named("gazette").
 		Complete(r)
+}
+
+func (r *GazetteReconciler) gazettesOfTypeset(ctx context.Context, o client.Object) []reconcile.Request {
+	gs := gazettesUsingTypeset(ctx, r.Client, typesetObjectKey(o))
+	ptrs := make([]*v1.Gazette, len(gs))
+	for i := range gs {
+		ptrs[i] = &gs[i]
+	}
+	return requestsFor(ptrs)
 }
 
 func (r *GazetteReconciler) enqueuePeers(ctx context.Context, q workqueue.TypedRateLimitingInterface[reconcile.Request], o client.Object) {
