@@ -1,0 +1,80 @@
+# Manifesto
+
+Manifesto 是完全 Kubernetes 原生的部落格引擎：內容都是 CRD，邏輯由 operator 處理，權限交給 K8s RBAC。
+完整設計見 `docs/design.md`；這份文件只放每次工作都需要的規則。
+
+- Go module：`go.pkgs.davy.tw/manifesto`
+- API group：暫用 `manifesto.davy.tw`，確定網域後全域替換
+
+## 核心原則（不可違反）
+
+- **內容即資源**：所有內容存在 etcd，以 CRD 表示。不引入額外資料庫（Letter 留言除外，未來另議）。
+- **不做權限判斷**：身分驗證、授權、稽核全部交給 K8s。desk 只轉送使用者 token，不用 impersonation。
+- **namespace 是信任邊界**：同 namespace 成員互相信任，不做 namespace 內的租戶隔離；跨 namespace 不共享任何東西（包括媒體去重）。
+- **press 決定狀態，herald 負責呈現**：herald 唯讀（get/list/watch），不寫任何資源；渲染結果不存進 status。
+- **只用標準 S3 API**：不依賴任何儲存廠商的特有功能。
+
+## 詞彙
+
+| Kind | 概念 | shortName |
+|---|---|---|
+| Gazette | 部落格站台（網域、logo、主題） | blog |
+| Dispatch | 文章；只屬於一個 Gazette（`gazetteRef` 單一值） | post |
+| Edition | 文章修訂版本，由 press 自動建立 | revision |
+| Section | 分類，一篇一個，可設 parent | category |
+| Stamp | 標籤，一篇多個 | tag |
+| Scribe | 作者 | author |
+| Typeset / ClusterTypeset | 主題 | theme |
+| Print | 媒體檔案的中繼資料 | media |
+| Archive / ClusterArchive | 媒體儲存設定（`s3` 或 `pvc` 二擇一） | store |
+
+- 元件：`press`（operator）、`herald`（訪客端）、`desk`（管理 web UI）、`darkroom`（媒體）、`mfctl`（CLI）
+- ClusterRole：`proofreader`（唯讀含草稿）、`editor`、`publisher`
+- Dispatch phase：`Draft`、`Embargoed`（已排程）、`Published`、`Unlisted`、`Retracted`
+- RSS 叫 Wire（`/wire.xml`）；未來：電子報 Issue、留言 Letter
+- 所有 CRD 都加入 `manifesto` category，並設定 shortNames、printer columns、schema description
+
+## Dispatch 狀態規則
+
+| spec.state | 條件 | status.phase | herald 回應 |
+|---|---|---|---|
+| Draft | — | Draft | 404 |
+| Published / Unlisted | 尚未發布過，且 `publishAt` 還沒到 | Embargoed | 404 |
+| Published | 其他情況 | Published | 200 |
+| Unlisted | 其他情況 | Unlisted | 200，不出現在列表、Wire、sitemap |
+| Retracted | — | Retracted | 410 Gone |
+
+- 第一次變成可見時寫入 `status.publishedAt`，之後不再改變，也不再看 `publishAt`
+- Embargoed 回傳 `RequeueAfter(min(publishAt - now, 1h))`；reconcile 必須冪等
+- `Rendered` condition：press 用 `internal/render` 試渲染（輸出丟棄），失敗 reason 為 `MarkdownError` / `TemplateError`，message 截斷至 1KB；只有 condition 真的改變才寫 status
+- herald 渲染失敗時沿用上一次成功的結果；從來沒成功過回 503
+
+## 程式慣例
+
+- Go + kubebuilder + controller-runtime；API 版本從 `v1alpha1` 開始
+- spec 是期望狀態，status 是觀察到的狀態；狀態一律用 `metav1.Condition`，並維護 `observedGeneration`
+- 寫入一律用 Server-Side Apply（fieldManager 用元件名稱，例如 `manifesto-press`）
+- 欄位驗證寫在 CRD schema 與 CEL（`x-kubernetes-validations`）；引用是否存在由 press 檢查並寫入 conditions
+- Section / Stamp 用 label 存英文代號：`section.manifesto.davy.tw/name: <name>`、`stamp.manifesto.davy.tw/<name>: ""`
+- `internal/render` 是 press 與 herald 共用的渲染套件（goldmark + bluemonday + html/template）
+- Typeset 模板只能用固定 FuncMap（日期格式化、`asset`、`printurl`、`url`、`truncate`），不開放自訂函式
+- 排程發布用 `RequeueAfter`，不用 cron
+- 只有需要清理叢集外資源時才用 finalizer（目前只有 Print）
+
+## 測試
+
+- press 的 reconcile 用 envtest
+- 渲染、狀態轉換規則用單元測試（table-driven）
+- 完成任何變更前執行 `make test` 和 `make lint`
+
+## 目前里程碑：M1（MVP）
+
+目標：`kubectl apply` 一篇 Dispatch，排程時間到自動發布，瀏覽器打開就看得到。
+
+1. kubebuilder 專案骨架；`cmd/press`、`cmd/herald`、`internal/render`
+2. `Gazette`、`Dispatch` CRD（含 CEL 驗證、shortNames、printer columns）
+3. press：Dispatch 狀態機、`gazetteRef`/`scribeRef` 檢查、`Rendered` condition
+4. herald：informer、依 Host 找 Gazette、記憶體內預先渲染、內建預設主題、ETag。快取 key 包含 Dispatch 與 Gazette 的 resourceVersion（Gazette 的標題、logo 也會影響頁面）；M2 加入 Typeset 後再把它的 resourceVersion 加進 key
+5. 測試：狀態機 envtest、渲染單元測試
+
+M1 範圍外（之後的里程碑）：Section/Stamp/Scribe/Typeset CRD、HTTPRoute 與 cert-manager、Print/Archive/darkroom、desk、Edition、mfctl。
