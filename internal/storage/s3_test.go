@@ -37,9 +37,9 @@ func newFakeS3(t *testing.T, bucket string) *S3 {
 	})
 }
 
-func put(t *testing.T, url, contentType, body string) int {
+func put(t *testing.T, target, contentType, body string) int {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPut, target, strings.NewReader(body))
 	req.Header.Set("Content-Type", contentType)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
