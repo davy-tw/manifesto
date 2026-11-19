@@ -1,0 +1,11 @@
+apiVersion: manifesto.davy.tw/v1alpha1
+kind: ClusterArchive
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: local
+spec:
+  pvc:
+    claimName: manifesto-media-data
+    publicURL: http://media.localtest.me:8090
