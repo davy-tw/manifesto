@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -99,18 +100,31 @@ func TestUI(t *testing.T) {
 	public, _ := url.Parse(srv.URL)
 	a, err := NewAuth(ctx, AuthConfig{
 		Issuer: issuer.URL, ClientID: "manifesto-desk", ClientSecret: "s",
-		RedirectURL: srv.URL + "/auth/callback", HTTPClient: issuer.Client(),
+		RedirectURL: srv.URL + "/auth/callback", HTTPClient: issuer.Client(), TokenSignIn: true,
 	}, newSealer(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv.Config.Handler = (&Server{Auth: a, Kube: kube, PublicURL: public, UI: UI(), Log: logr.Discard()}).Handler()
 
+	// A ServiceAccount for signing in with a pasted token.
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: uiNS, Name: "token-user"}}
+	mustCreate(sa, func() error { return admin.Create(ctx, sa) })
+	saBinding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Namespace: uiNS, Name: "token-user"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ui-editor"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: sa.Name, Namespace: uiNS}}}
+	mustCreate(saBinding, func() error { return admin.Create(ctx, saBinding) })
+	tr := &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: new(int64(3600))}}
+	if err := admin.SubResource("token").Create(ctx, sa, tr); err != nil {
+		t.Fatal(err)
+	}
+
 	shots := os.Getenv("DESK_UI_SHOTS")
 	if shots == "" {
 		shots = t.TempDir()
 	}
 	cmd := exec.CommandContext(ctx, "node", filepath.Join("uitest", "desk.cjs"), srv.URL, shots)
+	cmd.Env = append(os.Environ(), "DESK_UI_TOKEN="+tr.Status.Token)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	done := make(chan error, 1)
 	go func() { done <- cmd.Run() }()

@@ -44,8 +44,8 @@ func TestSealerRoundTrip(t *testing.T) {
 		value      Session
 		wantChunks int
 	}{
-		{"small", Session{IDToken: "abc", Name: "Alice"}, 1},
-		{"larger than one cookie", Session{IDToken: strings.Repeat("x", 3000), RefreshToken: strings.Repeat("y", 2000)}, 2},
+		{"small", Session{Token: "abc", Name: "Alice"}, 1},
+		{"larger than one cookie", Session{Token: strings.Repeat("x", 3000), RefreshToken: strings.Repeat("y", 2000)}, 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -71,7 +71,7 @@ func TestSealerRoundTrip(t *testing.T) {
 
 func TestSealerRejectsTamperingAndReplay(t *testing.T) {
 	s := newSealer(t)
-	_, cookies := roundTrip(t, s, sessionCookie, Session{IDToken: "abc"})
+	_, cookies := roundTrip(t, s, sessionCookie, Session{Token: "abc"})
 	sealed := cookies[0].Value
 
 	tampered := httptest.NewRequest(http.MethodGet, "/", nil)

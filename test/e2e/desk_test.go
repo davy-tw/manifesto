@@ -63,7 +63,7 @@ func registerDeskSpecs() {
 		By("listing and previewing through desk")
 		code, body = deskCall(Default, token, "GET", dispatches, "", "")
 		Expect(code).To(Equal("200"))
-		Expect(body).To(ContainSubstring(`"name":"from-desk"`))
+		Expect(body).To(MatchRegexp(`"name":\s*"from-desk"`))
 		preview := fmt.Sprintf(`{"dispatch":{"metadata":{"name":"draft","namespace":"%s"},`+
 			`"spec":{"gazetteRef":"alice-notes","title":"Previewed in desk","content":{"body":"Hello"}}}}`, blogNamespace)
 		code, body = deskCall(Default, token, "POST", "/api/preview", "application/json", preview)

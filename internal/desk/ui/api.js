@@ -42,6 +42,8 @@ const collection = (ns, plural) =>
 
 export const session = () => call('GET', '/api/session');
 export const logout = () => call('POST', '/auth/logout');
+export const signInMethods = () => call('GET', '/auth/methods');
+export const signInWithToken = (token) => call('POST', '/auth/token', { body: { token } });
 export const list = (ns, plural) => call('GET', collection(ns, plural)).then((l) => l.items);
 export const listCluster = (plural) =>
   call('GET', `/k8s/apis/${GROUP}/${VERSION}/${plural}`).then((l) => l.items);

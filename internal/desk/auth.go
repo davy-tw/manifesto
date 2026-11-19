@@ -10,9 +10,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -26,9 +28,10 @@ const (
 )
 
 // Session is what desk keeps about a signed-in user, sealed in a cookie.
-// desk forwards IDToken to the API server, which authenticates it.
+// desk forwards Token to the API server, which authenticates it.
 type Session struct {
-	IDToken      string    `json:"id"`
+	// Token is an OIDC ID token, or a token pasted at sign-in.
+	Token        string    `json:"id"`
 	RefreshToken string    `json:"rt,omitempty"`
 	Expiry       time.Time `json:"exp"`
 	// Name is shown in the UI only; Kubernetes decides who the user is.
@@ -41,35 +44,49 @@ type loginState struct {
 	Verifier string `json:"v"`
 }
 
-// Auth signs users in with OpenID Connect. The API server must trust the
-// same issuer with desk's client ID as audience (Structured Authentication
-// Configuration), since the ID token is what desk sends it.
+// Auth signs users in and keeps their session in an encrypted cookie. It
+// offers OpenID Connect, signing in with a pasted token, or both. With OIDC
+// the API server must trust the same issuer with desk's client ID as
+// audience (Structured Authentication Configuration), since the ID token is
+// what desk sends it.
 type Auth struct {
 	oauth    oauth2.Config
-	verifier *oidc.IDTokenVerifier
+	verifier *oidc.IDTokenVerifier // nil without OIDC
 	sealer   *Sealer
 	secure   bool
 	client   *http.Client
+	tokens   bool
 	// SessionMaxAge bounds how long a session cookie lives (default 12h).
 	SessionMaxAge time.Duration
 }
 
 // AuthConfig configures Auth.
 type AuthConfig struct {
+	// Issuer is the OIDC issuer; empty turns OIDC sign-in off.
 	Issuer       string
 	ClientID     string
 	ClientSecret string
 	// RedirectURL is desk's public URL followed by /auth/callback.
 	RedirectURL string
 	Scopes      []string
+	// TokenSignIn lets users sign in by pasting a token the API server
+	// accepts, such as one from "kubectl create token".
+	TokenSignIn bool
 	// Secure marks cookies Secure; true unless desk is served over plain HTTP.
 	Secure bool
 	// HTTPClient talks to the provider; nil uses the default client.
 	HTTPClient *http.Client
 }
 
-// NewAuth discovers the issuer and returns an Auth.
+// NewAuth discovers the issuer, if any, and returns an Auth.
 func NewAuth(ctx context.Context, cfg AuthConfig, sealer *Sealer) (*Auth, error) {
+	if cfg.Issuer == "" && !cfg.TokenSignIn {
+		return nil, errors.New("no sign-in method: set an OIDC issuer or allow token sign-in")
+	}
+	a := &Auth{sealer: sealer, secure: cfg.Secure, client: cfg.HTTPClient, tokens: cfg.TokenSignIn}
+	if cfg.Issuer == "" {
+		return a, nil
+	}
 	if cfg.HTTPClient != nil {
 		ctx = oidc.ClientContext(ctx, cfg.HTTPClient)
 	}
@@ -81,16 +98,62 @@ func NewAuth(ctx context.Context, cfg AuthConfig, sealer *Sealer) (*Auth, error)
 	if len(scopes) == 0 {
 		scopes = []string{oidc.ScopeOpenID, "email", "profile"}
 	}
-	return &Auth{
-		oauth: oauth2.Config{
-			ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, RedirectURL: cfg.RedirectURL,
-			Endpoint: provider.Endpoint(), Scopes: scopes,
-		},
-		verifier: provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
-		sealer:   sealer,
-		secure:   cfg.Secure,
-		client:   cfg.HTTPClient,
-	}, nil
+	a.oauth = oauth2.Config{
+		ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, RedirectURL: cfg.RedirectURL,
+		Endpoint: provider.Endpoint(), Scopes: scopes,
+	}
+	a.verifier = provider.Verifier(&oidc.Config{ClientID: cfg.ClientID})
+	return a, nil
+}
+
+// Methods are the sign-in methods desk offers, for the sign-in page.
+type Methods struct {
+	OIDC  bool `json:"oidc"`
+	Token bool `json:"token"`
+}
+
+// Methods returns the sign-in methods a offers; a may be nil.
+func (a *Auth) Methods() Methods {
+	if a == nil {
+		return Methods{}
+	}
+	return Methods{OIDC: a.verifier != nil, Token: a.tokens}
+}
+
+// SignInWithToken starts a session for token, which the caller has checked
+// the API server accepts. The session ends when the token expires, if it
+// says when, and after SessionMaxAge at the latest; it cannot be refreshed.
+func (a *Auth) SignInWithToken(w http.ResponseWriter, r *http.Request, token, name string) error {
+	expiry := time.Now().Add(a.maxAge())
+	if exp, ok := tokenExpiry(token); ok && exp.Before(expiry) {
+		expiry = exp
+	}
+	return a.sealer.SetCookie(w, r, sessionCookie, &Session{Token: token, Expiry: expiry, Name: name}, a.sessionOptions())
+}
+
+// tokenExpiry reads the exp claim of a JWT without verifying it: the API
+// server verifies the token on every request, this only ends the session
+// when the token can no longer work. Tokens that are not JWTs have none.
+func tokenExpiry(token string) (time.Time, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}, false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, false
+	}
+	var claims struct {
+		Exp json.Number `json:"exp"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return time.Time{}, false
+	}
+	exp, err := claims.Exp.Int64()
+	if err != nil || exp <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(exp, 0), true
 }
 
 // ctx carries the provider HTTP client, for the token exchange and refresh.
@@ -189,7 +252,7 @@ func (a *Auth) session(ctx context.Context, tok *oauth2.Token, nonce string) (*S
 	if name == "" {
 		name = claims.Email
 	}
-	return &Session{IDToken: raw, RefreshToken: tok.RefreshToken, Expiry: id.Expiry, Name: name}, nil
+	return &Session{Token: raw, RefreshToken: tok.RefreshToken, Expiry: id.Expiry, Name: name}, nil
 }
 
 // Logout ends the session. It is a POST so a link elsewhere cannot sign
@@ -212,7 +275,7 @@ func (a *Auth) Session(w http.ResponseWriter, r *http.Request) (*Session, error)
 	if time.Until(s.Expiry) > 30*time.Second {
 		return &s, nil
 	}
-	if s.RefreshToken == "" {
+	if s.RefreshToken == "" || a.verifier == nil {
 		return nil, errNoSession
 	}
 	tok, err := a.oauth.TokenSource(a.ctx(r), &oauth2.Token{RefreshToken: s.RefreshToken}).Token()

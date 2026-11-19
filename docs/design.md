@@ -344,6 +344,7 @@ status:
 - 登入用 OIDC authorization code + PKCE；ID token 與 refresh token 以 AES-GCM 加密存在 cookie（金鑰由 press 建立在 Secret `manifesto-desk-session`），desk 不保存任何 session，可以多副本
 - 代理只轉送 Manifesto 需要的路徑（manifesto.davy.tw 資源、events、RoleBinding、SelfSubject*Review），其他回 404；用 cookie 的寫入必須帶 `X-Manifesto-Desk` header 且 Origin 相同，防止 CSRF
 - 也接受 `Authorization: Bearer`（不經 cookie），方便腳本與測試
+- 選用的 token 登入（`--token-sign-in`）：使用者貼上 API server 認得的 token（例如 ServiceAccount token），desk 以 SelfSubjectReview 確認後存進同一個加密 cookie；session 在 token 的 `exp` 或 12 小時到期，不能 refresh。登入請求同樣要求 CSRF header，避免別的網站讓訪客以別人的身分登入
 
 ## 技術選型與待辦
 

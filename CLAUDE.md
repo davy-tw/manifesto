@@ -88,7 +88,7 @@ M1（MVP）、M2（內容與網站）、M3（媒體，PVC 與 S3 後端）、M4�
 
 S3 慣例：只用標準 S3 API（aws-sdk-go-v2，關閉非必要的 checksum header）；press 下載核對 sha256 後才把 Print 設為 Ready；憑證 Secret 用 API reader 直接讀取。測試：單元測試用 gofakes3，E2E 用開啟認證的 SeaweedFS（`test/e2e/s3/`）。
 
-desk 慣例：用使用者本人的 token（OIDC ID token 或 Bearer），沒有自己的 RBAC；代理有路徑白名單；cookie 寫入要帶 `X-Manifesto-Desk` header。測試：envtest 的 API server 以 `--authentication-config` 信任測試用 OIDC issuer；UI 用 Playwright（`make test-ui`）。
+desk 慣例：用使用者本人的 token（OIDC ID token、`--token-sign-in` 貼上的 token，或 Bearer），沒有自己的 RBAC；代理有路徑白名單；cookie 寫入要帶 `X-Manifesto-Desk` header。測試：envtest 的 API server 以 `--authentication-config` 信任測試用 OIDC issuer；UI 用 Playwright（`make test-ui`）。
 
 下一步：在真實 k3s 部署測試。範圍外：Edition、mfctl。
 
