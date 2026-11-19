@@ -44,6 +44,22 @@ make deploy IMG=<registry>/manifesto-press:<tag> HERALD_IMG=<registry>/manifesto
 
 herald 的 Service 是 `manifesto-system/manifesto-herald`。
 
+### 權限
+
+Manifesto 不做權限判斷，全靠 RBAC。在每個 namespace 用 RoleBinding 把人（或 OIDC 群組）綁到以下 ClusterRole：
+
+| 角色 | 可以做的事 |
+|---|---|
+| `manifesto-proofreader` | 讀取所有內容，包括草稿 |
+| `manifesto-editor` | proofreader，加上建立、修改、刪除 Dispatch、Section、Stamp、Print |
+| `manifesto-publisher` | editor，加上 Gazette、Scribe、Typeset、Archive，以及用上面三個角色管理成員 |
+
+```sh
+kubectl create rolebinding editors -n blog-alice --clusterrole=manifesto-editor --group=oidc:blog-alice-editors
+```
+
+所有登入的使用者都能讀取共用的 ClusterTypeset 與 ClusterArchive（`manifesto-catalog-reader`）。
+
 ### 媒體（Print）
 
 darkroom 把檔案存在 PVC `manifesto-system/manifesto-media-data`（叢集預設的 StorageClass，k3s 上是 `local-path`），因為 PVC 是 RWO，只跑一個副本。

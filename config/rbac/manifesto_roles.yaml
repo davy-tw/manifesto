@@ -1,0 +1,94 @@
+# The roles people get in a namespace (a publisher). Bind them with a
+# RoleBinding in that namespace; RBAC is the only access control Manifesto
+# has, and desk acts with each user's own token.
+#
+#   proofreader  read everything, drafts included
+#   editor       proofreader + write Dispatches, Sections, Stamps and Prints
+#   publisher    editor + Gazettes, Scribes, Typesets, Archives and members
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: proofreader
+rules:
+- apiGroups: [manifesto.davy.tw]
+  resources: [gazettes, dispatches, sections, stamps, scribes, typesets, prints, archives]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: editor
+rules:
+- apiGroups: [manifesto.davy.tw]
+  resources: [gazettes, dispatches, sections, stamps, scribes, typesets, prints, archives]
+  verbs: [get, list, watch]
+- apiGroups: [manifesto.davy.tw]
+  resources: [dispatches, sections, stamps, prints]
+  verbs: [create, update, patch, delete]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: publisher
+rules:
+- apiGroups: [manifesto.davy.tw]
+  resources: [gazettes, dispatches, sections, stamps, scribes, typesets, prints, archives]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [get, list, watch]
+# Members: publishers manage the namespace's RoleBindings, and may grant only
+# Manifesto's three roles.
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [rolebindings]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [clusterroles]
+  verbs: [bind]
+  resourceNames: [manifesto-proofreader, manifesto-editor, manifesto-publisher]
+---
+# Shared themes and storage are cluster-scoped, which a RoleBinding cannot
+# grant. They hold no secrets (a ClusterArchive only names its credentials
+# Secret), so every signed-in user may read them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: catalog-reader
+rules:
+- apiGroups: [manifesto.davy.tw]
+  resources: [clustertypesets, clusterarchives]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: catalog-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: catalog-reader
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:authenticated
