@@ -1,5 +1,8 @@
-# The shared Gateway press attaches HTTPRoutes to in gateway mode. Traefik
-# requires listener ports equal to its entrypoint ports: web is 8000.
+# The shared Gateway press attaches HTTPRoutes to in gateway mode, as in
+# docs/k3s.md step 3. Traefik requires listener ports equal to its
+# entrypoint ports: web is 8000, websecure 8443 (its Service exposes them
+# as 80 and 443). press attaches to websecure; tls.yaml makes the
+# certificate.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -8,6 +11,17 @@ metadata:
 spec:
   gatewayClassName: traefik
   listeners:
+  - name: websecure
+    protocol: HTTPS
+    port: 8443
+    hostname: "*.e2e.test"
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: e2e-wildcard-tls
+    allowedRoutes:
+      namespaces:
+        from: All
   - name: web
     protocol: HTTP
     port: 8000

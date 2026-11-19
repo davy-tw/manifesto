@@ -1,0 +1,42 @@
+# TLS for the shared Gateway, as in docs/k3s.md step 4, with a self-signed
+# CA in place of Let's Encrypt: cert-manager signs a wildcard certificate
+# for *.e2e.test, and the tests trust the CA (ca.crt in the same Secret).
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: e2e-selfsigned
+  namespace: kube-system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: e2e-ca
+  namespace: kube-system
+spec:
+  isCA: true
+  commonName: Manifesto E2E CA
+  secretName: e2e-ca
+  privateKey: {algorithm: ECDSA, size: 256}
+  issuerRef: {kind: Issuer, name: e2e-selfsigned}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: e2e-ca
+  namespace: kube-system
+spec:
+  ca:
+    secretName: e2e-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: e2e-wildcard
+  namespace: kube-system
+spec:
+  secretName: e2e-wildcard-tls
+  dnsNames: ["*.e2e.test"]
+  privateKey: {algorithm: ECDSA, size: 256}
+  issuerRef: {kind: Issuer, name: e2e-ca}
