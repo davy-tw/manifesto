@@ -7,20 +7,24 @@ SPDX-License-Identifier: MIT
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
 	"strings"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -99,6 +103,15 @@ func main() {
 	flag.IntVar(&heraldPort, "herald-port", 80, "Port of --herald-service.")
 	flag.StringVar(&routing.ClusterIssuer, "cluster-issuer", "",
 		"cert-manager ClusterIssuer for each Gazette's certificate. Leave empty to provide the TLS Secrets yourself.")
+	var media controller.Media
+	var darkroomSecret string
+	flag.StringVar(&media.DarkroomURL, "darkroom-url", "http://manifesto-darkroom.manifesto-system.svc:8081",
+		"darkroom's internal address, for pvc Archives. Empty disables the pvc backend.")
+	flag.StringVar(&media.DarkroomClaim, "darkroom-claim", "manifesto-media-data",
+		"The PersistentVolumeClaim darkroom serves; pvc Archives must name it.")
+	flag.StringVar(&darkroomSecret, "darkroom-secret", "manifesto-darkroom-keys",
+		"Secret, in press's namespace, holding the key that signs darkroom requests. Created if missing.")
+	flag.DurationVar(&media.UploadTTL, "upload-ttl", 5*time.Minute, "How long a Print's upload URL stays valid.")
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	if ns, name, ok := strings.Cut(heraldService, "/"); ok {
@@ -214,7 +227,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := controller.Setup(mgr, clock.RealClock{}, routing); err != nil {
+	if media.DarkroomURL != "" {
+		namespace := os.Getenv("POD_NAMESPACE")
+		if namespace == "" {
+			namespace = "manifesto-system"
+		}
+		c, err := client.New(mgr.GetConfig(), client.Options{Scheme: scheme})
+		if err == nil {
+			media.SigningKey, err = controller.EnsureSigningKey(context.Background(), c,
+				types.NamespacedName{Namespace: namespace, Name: darkroomSecret})
+		}
+		if err != nil {
+			setupLog.Error(err, "Failed to set up the darkroom signing key")
+			os.Exit(1)
+		}
+	}
+
+	pressOpts := controller.Options{Clock: clock.RealClock{}, Routing: routing, Media: media}
+	if err := controller.Setup(mgr, pressOpts); err != nil {
 		setupLog.Error(err, "Failed to set up controllers")
 		os.Exit(1)
 	}

@@ -8,9 +8,11 @@ package controller
 
 import (
 	"context"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -28,6 +30,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"go.pkgs.davy.tw/manifesto/internal/darkroom"
+
 	manifestov1alpha1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -42,6 +46,13 @@ var testRouting = Routing{
 	HeraldPort:    80,
 	ClusterIssuer: "letsencrypt",
 }
+
+var (
+	testSigningKey = []byte("test-signing-key")
+	testUploadTTL  = 4 * time.Second
+	darkroomStore  *darkroom.Store
+	darkroomPublic *httptest.Server
+)
 
 var (
 	ctx       context.Context
@@ -99,7 +110,18 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testRouting.Herald.Namespace}})).To(Succeed())
-	Expect(Setup(mgr, nil, testRouting)).To(Succeed())
+	By("starting an in-process darkroom")
+	darkroomStore = &darkroom.Store{Dir: GinkgoT().TempDir(), Keys: func() [][]byte { return [][]byte{testSigningKey} }, Log: logf.Log}
+	darkroomPublic = httptest.NewServer(darkroomStore.PublicHandler())
+	darkroomInternal := httptest.NewServer(darkroomStore.InternalHandler())
+	DeferCleanup(darkroomPublic.Close)
+	DeferCleanup(darkroomInternal.Close)
+	media := Media{
+		DarkroomURL: darkroomInternal.URL, DarkroomClaim: "manifesto-media-data",
+		SigningKey: testSigningKey, UploadTTL: testUploadTTL,
+	}
+
+	Expect(Setup(mgr, Options{Routing: testRouting, Media: media})).To(Succeed())
 	go func() {
 		defer GinkgoRecover()
 		Expect(mgr.Start(ctx)).To(Succeed())
