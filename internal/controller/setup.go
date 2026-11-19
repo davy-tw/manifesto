@@ -45,6 +45,9 @@ type Options struct {
 	Clock   clock.PassiveClock
 	Routing Routing
 	Media   Media
+	// Editions is how many Editions to keep per Dispatch: 0 means
+	// DefaultEditionLimit, a negative number turns Editions off.
+	Editions int
 }
 
 // Setup registers press's field indexes and controllers with mgr.
@@ -108,6 +111,7 @@ func Setup(mgr ctrl.Manager, opts Options) error {
 		&PrintReconciler{Client: c, Scheme: scheme, Media: opts.Media, Clock: opts.Clock},
 		&ArchiveReconciler{Client: c, Scheme: scheme, Media: opts.Media},
 		&ArchiveReconciler{Client: c, Scheme: scheme, Media: opts.Media, Cluster: true},
+		&EditionReconciler{Client: c, Scheme: scheme, Limit: editionLimit(opts.Editions)},
 		&SectionReconciler{Client: c, Scheme: scheme},
 		&TypesetReconciler{Client: c, Scheme: scheme},
 		&TypesetReconciler{Client: c, Scheme: scheme, Cluster: true},
@@ -164,4 +168,11 @@ func requestsFor[T client.Object](items []T) []reconcile.Request {
 		reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: o.GetNamespace(), Name: o.GetName()}})
 	}
 	return reqs
+}
+
+func editionLimit(n int) int {
+	if n == 0 {
+		return DefaultEditionLimit
+	}
+	return n
 }

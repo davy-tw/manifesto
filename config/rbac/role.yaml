@@ -75,6 +75,17 @@ rules:
 - apiGroups:
   - manifesto.davy.tw
   resources:
+  - editions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - manifesto.davy.tw
+  resources:
   - prints
   verbs:
   - get

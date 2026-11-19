@@ -111,6 +111,9 @@ func main() {
 		"The PersistentVolumeClaim darkroom serves; pvc Archives must name it.")
 	flag.StringVar(&darkroomSecret, "darkroom-secret", "manifesto-darkroom-keys",
 		"Secret, in press's namespace, holding the key that signs darkroom requests. Created if missing.")
+	var editions int
+	flag.IntVar(&editions, "editions", controller.DefaultEditionLimit,
+		"How many Editions (revisions) to keep per Dispatch; a negative number stops recording them.")
 	flag.DurationVar(&media.UploadTTL, "upload-ttl", 5*time.Minute, "How long a Print's upload URL stays valid.")
 	var deskSecret string
 	flag.StringVar(&deskSecret, "desk-session-secret", "manifesto-desk-session",
@@ -251,7 +254,9 @@ func main() {
 		}
 	}
 
-	pressOpts := controller.Options{Clock: clock.RealClock{}, Routing: routing, Media: media}
+	pressOpts := controller.Options{
+		Clock: clock.RealClock{}, Routing: routing, Media: media, Editions: editions,
+	}
 	if err := controller.Setup(mgr, pressOpts); err != nil {
 		setupLog.Error(err, "Failed to set up controllers")
 		os.Exit(1)

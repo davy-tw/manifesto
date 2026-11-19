@@ -132,7 +132,8 @@ var _ = BeforeSuite(func() {
 		SigningKey: testSigningKey, UploadTTL: testUploadTTL, Namespace: testRouting.Herald.Namespace,
 	}
 
-	Expect(Setup(mgr, Options{Routing: testRouting, Media: media})).To(Succeed())
+	// Keep 3 Editions so pruning is quick to see.
+	Expect(Setup(mgr, Options{Routing: testRouting, Media: media, Editions: 3})).To(Succeed())
 	go func() {
 		defer GinkgoRecover()
 		Expect(mgr.Start(ctx)).To(Succeed())

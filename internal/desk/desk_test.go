@@ -177,7 +177,7 @@ func call(t *testing.T, method, path, token, contentType string, body []byte) (i
 func installRoles(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	all := []string{"gazettes", "dispatches", "sections", "stamps", "scribes", "typesets", "prints", "archives"}
+	all := []string{"gazettes", "dispatches", "editions", "sections", "stamps", "scribes", "typesets", "prints", "archives"}
 	for name, rules := range map[string][]rbacv1.PolicyRule{
 		"proofreader": {{APIGroups: []string{v1.GroupName}, Resources: all, Verbs: []string{"get", "list", "watch"}}},
 		"editor": {

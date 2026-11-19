@@ -4,7 +4,10 @@
 #
 #   proofreader  read everything, drafts included
 #   editor       proofreader + write Dispatches, Sections, Stamps and Prints
-#   publisher    editor + Gazettes, Scribes, Typesets, Archives and members
+#   publisher    editor + Gazettes, Scribes, Typesets, Archives and members,
+#                and deleting Editions
+#
+# Everyone reads Editions (revisions); only press creates them.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -14,7 +17,7 @@ metadata:
   name: proofreader
 rules:
 - apiGroups: [manifesto.davy.tw]
-  resources: [gazettes, dispatches, sections, stamps, scribes, typesets, prints, archives]
+  resources: [gazettes, dispatches, editions, sections, stamps, scribes, typesets, prints, archives]
   verbs: [get, list, watch]
 - apiGroups: [""]
   resources: [events]
@@ -29,7 +32,7 @@ metadata:
   name: editor
 rules:
 - apiGroups: [manifesto.davy.tw]
-  resources: [gazettes, dispatches, sections, stamps, scribes, typesets, prints, archives]
+  resources: [gazettes, dispatches, editions, sections, stamps, scribes, typesets, prints, archives]
   verbs: [get, list, watch]
 - apiGroups: [manifesto.davy.tw]
   resources: [dispatches, sections, stamps, prints]
@@ -47,8 +50,16 @@ metadata:
   name: publisher
 rules:
 - apiGroups: [manifesto.davy.tw]
+  resources: [gazettes, dispatches, editions, sections, stamps, scribes, typesets, prints, archives]
+  verbs: [get, list, watch]
+- apiGroups: [manifesto.davy.tw]
   resources: [gazettes, dispatches, sections, stamps, scribes, typesets, prints, archives]
-  verbs: [get, list, watch, create, update, patch, delete]
+  verbs: [create, update, patch, delete]
+# Editions are written by press only. A publisher may delete one, for example
+# to remove something that should never have been saved.
+- apiGroups: [manifesto.davy.tw]
+  resources: [editions]
+  verbs: [delete, deletecollection]
 - apiGroups: [""]
   resources: [events]
   verbs: [get, list, watch]

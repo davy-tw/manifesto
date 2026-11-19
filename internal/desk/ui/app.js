@@ -7,6 +7,7 @@ import { printName, upload } from './media.js';
 const SECTION_LABEL = 'section.manifesto.davy.tw/name';
 const STAMP_PREFIX = 'stamp.manifesto.davy.tw/';
 const STATES = ['Draft', 'Published', 'Unlisted', 'Retracted'];
+const EDITION_LABEL = 'manifesto.davy.tw/dispatch';
 
 // h builds DOM. Text always goes through textContent, never innerHTML.
 function h(tag, attrs = {}, ...children) {
@@ -254,6 +255,38 @@ async function editorView(ns, name) {
     }
   };
 
+  // History: press records an Edition each time the content changes.
+  // Loading one fills the form; saving it restores it (as a new Edition).
+  const historyList = h('ul', { class: 'editions' });
+  const loadEdition = (e) => {
+    const s = e.spec.snapshot;
+    f.title.value = s.title || '';
+    f.summary.value = s.summary || '';
+    f.cover.value = s.cover || '';
+    f.body.value = s.content?.body || '';
+    refreshPreview();
+    message.replaceChildren(notice(`Loaded edition ${e.spec.number} into the editor. Save to restore it.`, 'info'));
+  };
+  const refreshHistory = async () => {
+    historyList.replaceChildren(h('li', {}, 'Loading…'));
+    try {
+      const editions = await api.listSelected(ns, 'editions', `${EDITION_LABEL}=${dispatch.metadata.name}`);
+      editions.sort((a, b) => b.spec.number - a.spec.number);
+      historyList.replaceChildren(...(editions.length ? editions.map((e) =>
+        h('li', {},
+          h('span', { class: 'edition-number' }, `#${e.spec.number}`),
+          h('span', { class: 'edition-title' }, e.spec.snapshot.title || '(untitled)'),
+          h('small', {}, fmtDate(e.metadata.creationTimestamp)),
+          h('button', { type: 'button', onclick: () => loadEdition(e) }, `Load edition ${e.spec.number}`))) : [h('li', {}, 'No editions yet.')]));
+    } catch (err) {
+      historyList.replaceChildren(h('li', {}, failure(err)));
+    }
+  };
+  const history = dispatch
+    ? h('details', { class: 'history', ontoggle: (e) => { if (e.target.open) refreshHistory(); } },
+      h('summary', {}, 'History'), historyList)
+    : null;
+
   const field = (label, el, hint) => h('label', {}, h('span', {}, label), el, hint ? h('small', {}, hint) : null);
   show(
     h('div', { class: 'toolbar' },
@@ -263,6 +296,7 @@ async function editorView(ns, name) {
     ),
     message,
     status,
+    history,
     h('div', { class: 'editor' },
       h('form', { class: 'fields', onsubmit: (e) => { e.preventDefault(); save(); } },
         dispatch ? null : field('Name (URL slug)', f.name, 'Lowercase letters, digits and dashes.'),
@@ -285,6 +319,7 @@ async function editorView(ns, name) {
       if (object.metadata.name !== dispatch.metadata.name) return;
       phase.textContent = object.status?.phase || '…';
       status.replaceChildren(conditions(object));
+      if (history?.open && latest && object.metadata.generation !== latest.metadata.generation) refreshHistory();
       latest = object;
     }, current.signal, { name: dispatch.metadata.name }).catch(() => {});
   }

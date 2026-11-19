@@ -45,6 +45,8 @@ export const logout = () => call('POST', '/auth/logout');
 export const signInMethods = () => call('GET', '/auth/methods');
 export const signInWithToken = (token) => call('POST', '/auth/token', { body: { token } });
 export const list = (ns, plural) => call('GET', collection(ns, plural)).then((l) => l.items);
+export const listSelected = (ns, plural, labelSelector) =>
+  call('GET', `${collection(ns, plural)}?labelSelector=${encodeURIComponent(labelSelector)}`).then((l) => l.items);
 export const listCluster = (plural) =>
   call('GET', `/k8s/apis/${GROUP}/${VERSION}/${plural}`).then((l) => l.items);
 export const get = (ns, plural, name) => call('GET', `${collection(ns, plural)}/${encodeURIComponent(name)}`);
