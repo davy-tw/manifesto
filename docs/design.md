@@ -152,7 +152,10 @@ status:
 namespace 是最小的權限單位，系統本身不做任何權限判斷，全部交給 K8s 的 RBAC。
 
 - **信任邊界**：同一個 namespace 的成員彼此信任，可以編輯彼此的 Dispatch，也看得到草稿
-- **角色**：`proofreader`、`editor`、`publisher` 三個 ClusterRole 定義一次，各 namespace 用 RoleBinding 綁定
+- **角色**：`proofreader`、`editor`、`publisher` 三個 ClusterRole 定義一次，各 namespace 用 RoleBinding 綁定。部署後的名稱有 `manifesto-` 前綴（`manifesto-editor` 等）
+- **成員管理**：publisher 可以管理 namespace 裡的 RoleBinding，但只能授予這三個角色（`bind` 限定 resourceNames），不能把人升成 cluster-admin
+- **共用目錄**：ClusterTypeset 與 ClusterArchive 是叢集範圍的資源，RoleBinding 授權不到，所以另有 `manifesto-catalog-reader`，以 ClusterRoleBinding 開放給所有登入的使用者（`system:authenticated`）唯讀。它們不含機密，ClusterArchive 只寫憑證 Secret 的名稱
+- **Secret 不在角色裡**：S3 憑證由叢集管理者建立；publisher 也不能讀 namespace 的 Secret
 - **訪客不經過 K8s API**：herald 只提供 `Published` 和 `Unlisted` 的文章；`Retracted` 回 410，`Draft`、`Embargoed` 和不存在的文章回 404，不透露草稿存在
 - **desk 只轉送使用者的 token**：以使用者本人的身分呼叫 API server，audit log 記錄的就是本人；不使用 impersonation
 
@@ -185,7 +188,7 @@ subjects:
   apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: ClusterRole
-  name: editor
+  name: manifesto-editor
   apiGroup: rbac.authorization.k8s.io
 ```
 
