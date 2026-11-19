@@ -117,9 +117,11 @@ func expectServedThroughTraefik() {
 	}).Should(Succeed())
 
 	By("presenting a certificate for the Gazette's domain, which curl refuses without the CA")
-	out, _ := utils.Run(exec.Command("kubectl", "exec", tlsCurlPod, "-n", "kube-system", "--",
-		"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--resolve", blogDomain+":443:"+ip, url))
-	Expect(out).To(Equal("000"), "an untrusted certificate must fail verification")
+	// curl exits with 60 when it cannot authenticate the peer's certificate.
+	out, err := utils.Run(exec.Command("kubectl", "exec", tlsCurlPod, "-n", "kube-system", "--",
+		"curl", "-s", "-o", "/dev/null", "--resolve", blogDomain+":443:"+ip, url))
+	Expect(err).To(HaveOccurred(), "an untrusted certificate must fail verification")
+	Expect(out).To(ContainSubstring("exit code 60"), "curl must fail on the certificate, not something else")
 
 	By("not serving the Gazette on the plain HTTP listener, which press does not attach to")
 	code, _ := curlFrom(Default, "http://"+traefikService+"/posts/"+dispatchName)
