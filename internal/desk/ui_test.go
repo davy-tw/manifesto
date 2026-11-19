@@ -61,7 +61,7 @@ func TestUI(t *testing.T) {
 	go func() { _ = mgr.Start(ctx) }()
 
 	// The publication: alice's group may edit, everyone may read the catalog.
-	all := []string{"gazettes", "dispatches", "sections", "stamps", "scribes", "typesets", "prints", "archives"}
+	all := []string{"gazettes", "dispatches", "editions", "sections", "stamps", "scribes", "typesets", "prints", "archives"}
 	mustCreate := func(obj interface {
 		GetName() string
 	}, create func() error) {

@@ -59,6 +59,13 @@ func registerDeskSpecs() {
 			"-o", "jsonpath={.metadata.managedFields[0].manager}"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(manager).To(Equal("manifesto-desk"))
+		By("press recording the first Edition, readable by the editor")
+		Eventually(func(g Gomega) {
+			code, body := deskCall(g, token, "GET", "/k8s/apis/manifesto.davy.tw/v1alpha1/namespaces/"+blogNamespace+
+				"/editions/from-desk-1", "", "")
+			g.Expect(code).To(Equal("200"))
+			g.Expect(body).To(MatchRegexp(`"title":\s*"From desk"`))
+		}).Should(Succeed())
 
 		By("listing and previewing through desk")
 		code, body = deskCall(Default, token, "GET", dispatches, "", "")

@@ -90,6 +90,18 @@ const path = require('path');
     await page.getByText('Saved.').waitFor();
     await page.screenshot({ path: path.join(shots, 'desk-editor.png') });
 
+    step('restore the first edition from the history');
+    await page.getByText('History').click();
+    await page.getByRole('button', { name: 'Load edition 1' }).waitFor();
+    await page.screenshot({ path: path.join(shots, 'desk-history.png') });
+    await page.getByRole('button', { name: 'Load edition 1' }).click();
+    await page.getByText('Loaded edition 1 into the editor').waitFor();
+    if ((await page.inputValue('#f-title')) !== 'Hello from the UI') throw new Error('edition 1 did not load');
+    await preview.locator('h1', { hasText: 'Hello from the UI' }).waitFor();
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByText('Saved.').waitFor();
+    await page.locator('.editions li', { hasText: 'Hello from the UI' }).nth(1).waitFor();
+
     step('sign in with a pasted token instead');
     const other = await browser.newContext({ viewport: { width: 1400, height: 900 } });
     const tp = await other.newPage();
@@ -104,7 +116,7 @@ const path = require('path');
     await tp.locator('#who', { hasText: 'system:serviceaccount:blog-ui:token-user' }).waitFor();
     await tp.fill('#ns', 'blog-ui');
     await tp.press('#ns', 'Enter');
-    await tp.getByRole('link', { name: 'Hello again' }).waitFor();
+    await tp.getByRole('link', { name: 'Hello from the UI' }).waitFor();
     await other.close();
     console.log('UI OK');
   } catch (e) {

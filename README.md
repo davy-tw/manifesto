@@ -82,7 +82,9 @@ Manifesto 不做權限判斷，全靠 RBAC。在每個 namespace 用 RoleBinding
 |---|---|
 | `manifesto-proofreader` | 讀取所有內容，包括草稿 |
 | `manifesto-editor` | proofreader，加上建立、修改、刪除 Dispatch、Section、Stamp、Print |
-| `manifesto-publisher` | editor，加上 Gazette、Scribe、Typeset、Archive，以及用上面三個角色管理成員 |
+| `manifesto-publisher` | editor，加上 Gazette、Scribe、Typeset、Archive，以及用上面三個角色管理成員、刪除 Edition |
+
+Edition（文章的修訂版本）由 press 建立，所有角色都能讀。
 
 ```sh
 kubectl create rolebinding editors -n blog-alice --clusterrole=manifesto-editor --group=oidc:blog-alice-editors

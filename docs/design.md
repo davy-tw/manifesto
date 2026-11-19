@@ -130,7 +130,7 @@ status:
 
 | 資源 | 主要 spec 欄位 |
 |---|---|
-| Edition | `dispatchRef`、內容快照；由 press 在內容變更時自動建立 |
+| Edition | `dispatchRef`、`number`、內容快照（`snapshot`：title、summary、cover、scribeRef、content）；由 press 在內容變更時自動建立，建立後不可修改 |
 | Section | `displayName`、`description`、`parent`（可形成階層） |
 | Stamp | `displayName`、`description`；選用，沒有建立就顯示 label 的英文代號 |
 | Scribe | `displayName`、`bio`、`avatar`、對應的 OIDC 身分 |
@@ -335,11 +335,21 @@ status:
 
 文章內容存在 etcd，所以備份媒體時 etcd 也要一起備份。
 
+## Edition（修訂版本）
+
+- press 在 Dispatch 的內容（title、summary、cover、scribeRef、content）改變時建立 Edition；只改 state、publishAt、gazetteRef 或分類 label 不算
+- 名稱是 `<dispatch>-<number>`，number 從 1 遞增；用 label `manifesto.davy.tw/dispatch` 查詢。和最新一版的 `digest` 相同就不建立，所以 reconcile 冪等
+- 每篇保留最近 20 版（press 的 `--editions`；負數停止記錄），而且這些版本的內容合計不超過 2 MiB（`--edition-bytes`；0 不限制），從最新一版往回算，超過的由 press 刪除，最新一版一定保留。ownerReference 指向 Dispatch，刪文章時一起回收
+- spec 用 CEL 禁止修改；所有角色都能讀，只有 publisher 能刪除（例如移除不該留下的內容），沒有人能建立
+- 還原：把舊版的 snapshot 複製回 Dispatch（desk 的 History、`mfctl edition restore`），這會成為新的一版，歷史不會被改寫
+- 為什麼限制大小：Edition 存在 etcd，整個叢集共用。一篇最多 512KB，只限版數的話一篇最多約 10MB；k3s 用內嵌 etcd 時預設上限 2 GiB，用滿後整個叢集變成唯讀（單節點預設的 SQLite 沒有這個上限）。2 MiB 是一般文章的 20 版，或最大文章的 4 版
+
 ## desk（管理介面）
 
 - SPA + 後端；後端負責 OIDC 登入、session cookie，並把請求代理到 API server。SPA 不直接連 API server
 - Markdown 編輯與即時預覽：預覽呼叫共用的 `internal/render`，套用真正的主題
 - 透過 watch 即時顯示 `phase` 變化
+- 編輯器的 History 列出 Edition，可以把舊版載入編輯器，儲存後即還原
 - 編輯衝突以 `resourceVersion` 樂觀鎖偵測（API 回 409 時提示合併）；寫入用 Server-Side Apply，fieldManager 為 `manifesto-desk`
 - 登入用 OIDC authorization code + PKCE；ID token 與 refresh token 以 AES-GCM 加密存在 cookie（金鑰由 press 建立在 Secret `manifesto-desk-session`），desk 不保存任何 session，可以多副本
 - 代理只轉送 Manifesto 需要的路徑（manifesto.davy.tw 資源、events、RoleBinding、SelfSubject*Review），其他回 404；用 cookie 的寫入必須帶 `X-Manifesto-Desk` header 且 Origin 相同，防止 CSRF
@@ -366,7 +376,7 @@ status:
 1. **M1 MVP**（已完成）：專案骨架、Gazette + Dispatch CRD、press 狀態機與 `Rendered` condition、herald + 內建預設主題、envtest 與單元測試
 2. **M2 內容與網站**（已完成）：Section、Stamp、Scribe、Typeset / ClusterTypeset、Wire 與 sitemap、分頁與篩選、HTTPRoute + cert-manager
 3. **M3 媒體**（已完成）：Print、Archive、darkroom（先 PVC driver，再 S3）
-4. **M4 管理介面**：desk，以及 `proofreader`、`editor`、`publisher` 三個 ClusterRole
+4. **M4 管理介面**（已完成）：desk，以及 `proofreader`、`editor`、`publisher` 三個 ClusterRole
 5. **M5 補完**：Edition、mfctl、Helm chart
 
 **待辦與未來功能**

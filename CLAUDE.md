@@ -69,7 +69,7 @@ Manifesto 是完全 Kubernetes 原生的部落格引擎：內容都是 CRD，邏
 
 ## 里程碑
 
-M1（MVP）、M2（內容與網站）、M3（媒體，PVC 與 S3 後端）、M4（desk 與角色）已完成。程式位置：
+M1（MVP）、M2（內容與網站）、M3（媒體，PVC 與 S3 後端）、M4（desk 與角色）已完成；M5（Edition、mfctl、Helm chart）進行中。程式位置：
 
 - press：`internal/controller`（`setup.go` 註冊 index 與所有 controller；狀態機 `phase.go`；主題解析 `theme.go`；路由 `routing.go`）
 - 網域歸屬（press 與 herald 共用）：`internal/domain`
@@ -78,6 +78,7 @@ M1（MVP）、M2（內容與網站）、M3（媒體，PVC 與 S3 後端）、M4�
 - herald：`internal/herald`（`build.go` 快照、`feed.go` Wire 與 sitemap、`handler.go` 路由）
 - desk：`internal/desk`（`auth.go` OIDC、`session.go` 加密 cookie、`kube.go` 代理與路徑白名單、`server.go` 路由與預覽、`ui/` 嵌入的 SPA）與 `cmd/desk`；press 與 desk 共用的主題與分類解析在 `internal/sitedata`
 - 角色：`config/rbac/manifesto_roles.yaml`（envtest 在 `test/rbac`）
+- Edition：`internal/controller/edition_controller.go`（內容 digest 改變才建立 `<dispatch>-<n>`，保留 `--editions` 版且總內容不超過 `--edition-bytes`，預設 20 版、2Mi，最新一版一定保留；spec 以 CEL 禁止修改）
 - 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 與 k3d（k3s + Traefik，`make test-e2e-k3d`，含 gateway 路由經過 Traefik 的驗證）上的 E2E 在 `test/e2e`，CI 兩者都跑；envtest 用的第三方 CRD 在 `test/crds`
 
 目標環境：先以 k3s（內建 Traefik）做小規模正式測試，見 `docs/k3s.md`。新功能要能在 k3s 上運作：Traefik 不支援 ListenerSet（v3.8 前）、listener port 必須是 entrypoint port（8000/8443）、預設 StorageClass `local-path` 只有 RWO。
@@ -90,6 +91,6 @@ S3 慣例：只用標準 S3 API（aws-sdk-go-v2，關閉非必要的 checksum he
 
 desk 慣例：用使用者本人的 token（OIDC ID token、`--token-sign-in` 貼上的 token，或 Bearer），沒有自己的 RBAC；代理有路徑白名單；cookie 寫入要帶 `X-Manifesto-Desk` header。測試：envtest 的 API server 以 `--authentication-config` 信任測試用 OIDC issuer；UI 用 Playwright（`make test-ui`）。
 
-下一步：在真實 k3s 部署測試。範圍外：Edition、mfctl。
+下一步：M5 的 mfctl 與 Helm chart，之後在真實 k3s 部署測試。
 
 測試計畫：整套功能完成後才在真實的 k3s 環境部署測試；在那之前以 CI 上的 Kind 與 k3d E2E 為準。

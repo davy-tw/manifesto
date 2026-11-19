@@ -171,6 +171,12 @@ func print(ns, name string) *v1.Print {
 	}}
 }
 
+// edition returns an Edition in the test namespace.
+func edition(name string) *v1.Edition {
+	return &v1.Edition{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: name},
+		Spec: v1.EditionSpec{DispatchRef: "existing", Number: 1, Snapshot: v1.EditionSnapshot{Title: "T"}}}
+}
+
 func gazette(ns, name string) *v1.Gazette {
 	return &v1.Gazette{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
 		Spec: v1.GazetteSpec{Title: "T", Domain: name + ".example.io"}}
@@ -197,6 +203,9 @@ func TestRoles(t *testing.T) {
 	if err := admin.Create(ctx, dispatch(ns, "existing")); err != nil {
 		t.Fatal(err)
 	}
+	if err := admin.Create(ctx, edition("existing-1")); err != nil {
+		t.Fatal(err)
+	}
 
 	proofreader := user(t, "pat", "oidc:proofreaders")
 	editor := user(t, "eve", "oidc:editors")
@@ -211,6 +220,7 @@ func TestRoles(t *testing.T) {
 		}
 		expect(t, "list prints", true, proofreader.List(ctx, &v1.PrintList{}, client.InNamespace(ns)))
 		expect(t, "create dispatch", false, proofreader.Create(ctx, dispatch(ns, "p1")))
+		expect(t, "list editions", true, proofreader.List(ctx, &v1.EditionList{}, client.InNamespace(ns)))
 	})
 
 	t.Run("editor writes content but not the site", func(t *testing.T) {
@@ -224,6 +234,9 @@ func TestRoles(t *testing.T) {
 		expect(t, "add a member", false, editor.Create(ctx, member(namePrefix+"proofreader")))
 		expect(t, "create dispatch in another namespace", false, editor.Create(ctx, dispatch(other, "e1")))
 		expect(t, "write print status", false, editor.Status().Update(ctx, print(ns, "e1")))
+		expect(t, "read editions", true, editor.List(ctx, &v1.EditionList{}, client.InNamespace(ns)))
+		expect(t, "create edition", false, editor.Create(ctx, edition("e1-1")))
+		expect(t, "delete edition", false, editor.Delete(ctx, edition("existing-1")))
 	})
 
 	t.Run("publisher runs the site and its members", func(t *testing.T) {
@@ -236,6 +249,8 @@ func TestRoles(t *testing.T) {
 		expect(t, "make someone cluster-admin", false, publisher.Create(ctx, member("cluster-admin")))
 		expect(t, "read secrets", false, publisher.List(ctx, &corev1.SecretList{}, client.InNamespace(ns)))
 		expect(t, "create gazette in another namespace", false, publisher.Create(ctx, gazette(other, "pia")))
+		expect(t, "create edition", false, publisher.Create(ctx, edition("pia-1")))
+		expect(t, "delete edition", true, publisher.Delete(ctx, edition("existing-1")))
 	})
 
 	t.Run("everyone signed in reads the shared catalog, nothing else", func(t *testing.T) {

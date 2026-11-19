@@ -12,6 +12,7 @@ resources:
 - bases/manifesto.davy.tw_prints.yaml
 - bases/manifesto.davy.tw_archives.yaml
 - bases/manifesto.davy.tw_clusterarchives.yaml
+- bases/manifesto.davy.tw_editions.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
