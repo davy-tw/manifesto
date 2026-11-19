@@ -47,7 +47,20 @@ herald 的 Service 是 `manifesto-system/manifesto-herald`，desk 的是 `manife
 
 ### desk（管理介面）
 
-desk 以使用者本人的 token 呼叫 API server，本身沒有任何 RBAC 權限。使用者透過 OIDC 登入，所以 API server 要信任同一個 OIDC 提供者（設定見 `docs/design.md` 的「OIDC 綁定」，k3s 見 `docs/k3s.md`）。
+desk 以使用者本人的 token 呼叫 API server，本身沒有任何 RBAC 權限。登入方式有兩種：
+
+- **OIDC**（建議）：API server 要信任同一個 OIDC 提供者（設定見 `docs/design.md` 的「OIDC 綁定」，k3s 見 `docs/k3s.md`）
+- **貼上 token**（`--token-sign-in`）：還沒有 OIDC 時使用。token 加密存在 session cookie，到期（最長 12 小時）就要重新貼，不能 refresh。例如替每位作者建一個 ServiceAccount：
+
+  ```sh
+  kubectl create serviceaccount alice -n blog-alice
+  kubectl create rolebinding alice -n blog-alice --clusterrole=manifesto-editor --serviceaccount=blog-alice:alice
+  kubectl create token alice -n blog-alice --duration=8h
+  ```
+
+  audit log 記錄的會是這個 ServiceAccount。拿到 token 的人就擁有它的權限，請用短效 token，不要建立永久的 token Secret
+
+腳本與 API client 不用登入，直接帶 `Authorization: Bearer <token>` 即可。
 
 `config/desk/deployment.yaml` 的參數：
 
@@ -57,6 +70,7 @@ desk 以使用者本人的 token 呼叫 API server，本身沒有任何 RBAC 權
 | `--oidc-issuer` | OIDC 提供者；不設定時只接受 `Authorization: Bearer` 的請求 |
 | `--oidc-client-id` | 預設 `manifesto-desk`，必須在 API server 的 `audiences` 裡 |
 | `--oidc-scopes` | 預設 `openid,email,profile`；提供者要另外要求才給 `groups` 時加上去 |
+| `--token-sign-in` | 讓使用者在登入頁貼上 API server 認得的 token 登入（例如 `kubectl create token`），可以和 OIDC 並存；預設關閉 |
 
 client secret 放在 Secret `manifesto-desk-oidc` 的 `clientSecret`（public client 可以不建）。session cookie 的加密金鑰由 press 自動建立在 Secret `manifesto-desk-session`。
 

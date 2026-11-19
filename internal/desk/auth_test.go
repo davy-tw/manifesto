@@ -233,7 +233,7 @@ func TestSignIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Name != "Alice" || s.IDToken == "" || s.RefreshToken != "rt" {
+	if s.Name != "Alice" || s.Token == "" || s.RefreshToken != "rt" {
 		t.Errorf("session = %+v", s)
 	}
 }
@@ -290,7 +290,7 @@ func TestSessionRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if issuer.refresh != 1 || b.cookies[sessionCookie].Value == first || s.IDToken == "" {
+	if issuer.refresh != 1 || b.cookies[sessionCookie].Value == first || s.Token == "" {
 		t.Errorf("refreshes = %d; the session cookie must be replaced", issuer.refresh)
 	}
 

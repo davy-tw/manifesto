@@ -35,6 +35,8 @@ spec:
         # - --oidc-issuer=https://auth.example.io
         # - --oidc-client-id=manifesto-desk
         # - --oidc-scopes=openid,email,profile,offline_access,groups
+        # Sign in by pasting a token (kubectl create token ...), with or without OIDC:
+        # - --token-sign-in
         - --session-key-file=/etc/desk/session/key
         env:
         - name: OIDC_CLIENT_SECRET

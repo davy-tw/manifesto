@@ -89,6 +89,23 @@ const path = require('path');
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByText('Saved.').waitFor();
     await page.screenshot({ path: path.join(shots, 'desk-editor.png') });
+
+    step('sign in with a pasted token instead');
+    const other = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    const tp = await other.newPage();
+    tp.setDefaultTimeout(15000);
+    await tp.goto(url);
+    await tp.fill('#token', 'not-a-token');
+    await tp.getByRole('button', { name: 'Sign in with token' }).click();
+    await tp.getByText('the API server did not accept this token').waitFor();
+    await tp.fill('#token', process.env.DESK_UI_TOKEN);
+    await tp.screenshot({ path: path.join(shots, 'desk-token-signin.png') });
+    await tp.getByRole('button', { name: 'Sign in with token' }).click();
+    await tp.locator('#who', { hasText: 'system:serviceaccount:blog-ui:token-user' }).waitFor();
+    await tp.fill('#ns', 'blog-ui');
+    await tp.press('#ns', 'Enter');
+    await tp.getByRole('link', { name: 'Hello again' }).waitFor();
+    await other.close();
     console.log('UI OK');
   } catch (e) {
     const state = await page.evaluate(async () => {

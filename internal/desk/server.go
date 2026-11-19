@@ -49,9 +49,16 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-	if s.Auth != nil {
+	methods := s.Auth.Methods()
+	mux.HandleFunc("GET /auth/methods", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, methods) })
+	if methods.OIDC {
 		mux.HandleFunc("GET /auth/login", s.Auth.Login)
 		mux.HandleFunc("GET /auth/callback", s.Auth.Callback)
+	}
+	if methods.Token {
+		mux.Handle("POST /auth/token", s.guard(http.HandlerFunc(s.tokenSignIn)))
+	}
+	if s.Auth != nil {
 		mux.Handle("POST /auth/logout", s.guard(http.HandlerFunc(s.Auth.Logout)))
 	}
 	mux.Handle("GET /api/session", s.withToken(s.session))
@@ -88,7 +95,7 @@ func (s *Server) withToken(h func(http.ResponseWriter, *http.Request, string)) h
 			}
 			if s.Auth != nil {
 				if sess, err := s.Auth.Session(w, r); err == nil {
-					token = sess.IDToken
+					token = sess.Token
 				}
 			}
 		}
@@ -155,6 +162,48 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, token string) {
 		}
 	}
 	writeJSON(w, info)
+}
+
+// TokenSignIn is the body of POST /auth/token.
+type TokenSignIn struct {
+	Token string `json:"token"`
+}
+
+// tokenSignIn starts a session with a token the user pasted, once the API
+// server has said whose it is. Like every state change made from the
+// browser it needs the CSRF header, so no other site can sign a visitor in
+// as someone else.
+func (s *Server) tokenSignIn(w http.ResponseWriter, r *http.Request) {
+	var req TokenSignIn
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
+		http.Error(w, "invalid sign-in request", http.StatusBadRequest)
+		return
+	}
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		http.Error(w, "token is required", http.StatusBadRequest)
+		return
+	}
+	c, err := s.Kube.Client(token)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	review := &authenticationv1.SelfSubjectReview{}
+	if err := c.Create(r.Context(), review); err != nil {
+		if apierrors.IsUnauthorized(err) {
+			http.Error(w, "the API server did not accept this token", http.StatusUnauthorized)
+			return
+		}
+		s.fail(w, err)
+		return
+	}
+	user := review.Status.UserInfo
+	if err := s.Auth.SignInWithToken(w, r, token, user.Username); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, SessionInfo{Name: user.Username, Username: user.Username, Groups: user.Groups})
 }
 
 // PreviewRequest is the body of /api/preview: the Dispatch as edited.

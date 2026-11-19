@@ -174,6 +174,8 @@ spec:
 
 ## 8. 管理介面（desk）與 OIDC
 
+還沒準備好 OIDC 時，可以先用 `--token-sign-in`：在 desk 的登入頁貼上 `kubectl create token` 產生的 token（見 README 的 desk 一節），下面的 API server 設定可以之後再做。
+
 desk 用使用者本人的 OIDC ID token 呼叫 API server，所以 k3s 的 API server 要信任 OIDC 提供者。在 OIDC 提供者註冊一個 client：client ID `manifesto-desk`，redirect URL `https://desk.blog.example.io/auth/callback`，並讓 ID token 帶 `email` 與 `groups` claim。
 
 把 AuthenticationConfiguration 放到 server 節點上：

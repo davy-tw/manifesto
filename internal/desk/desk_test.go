@@ -9,6 +9,7 @@ package desk
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -356,5 +358,102 @@ func TestOIDCThroughTheAPIServer(t *testing.T) {
 	}
 	if !slices.Contains(info.Groups, "oidc:blog-alice-editors") {
 		t.Errorf("groups = %v, want the provider's groups mapped with the oidc: prefix", info.Groups)
+	}
+}
+
+func TestTokenSignIn(t *testing.T) {
+	a, err := NewAuth(context.Background(), AuthConfig{TokenSignIn: true}, newSealer(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, _ := url.Parse("http://desk")
+	srv := (&Server{Auth: a, Kube: kube, PublicURL: public, Log: logr.Discard()}).Handler()
+	do := func(method, path, body string, header http.Header, cookies ...*http.Cookie) *http.Response {
+		req := httptest.NewRequest(method, "http://desk"+path, strings.NewReader(body))
+		maps.Copy(req.Header, header)
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+	csrf := http.Header{CSRFHeader: {"1"}, "Content-Type": {"application/json"}}
+	token := userToken(t, "pasted", "")
+
+	resp := do(http.MethodGet, "/auth/methods", "", nil)
+	var m Methods
+	_ = json.NewDecoder(resp.Body).Decode(&m)
+	if m != (Methods{Token: true}) {
+		t.Errorf("methods = %+v, want token only", m)
+	}
+	if resp := do(http.MethodGet, "/auth/login", "", nil); resp.StatusCode == http.StatusFound {
+		t.Error("OIDC sign-in is served without an issuer")
+	}
+	body, _ := json.Marshal(TokenSignIn{Token: token})
+	if resp := do(http.MethodPost, "/auth/token", string(body), http.Header{"Content-Type": {"application/json"}}); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("sign-in without the CSRF header = %d, want 403", resp.StatusCode)
+	}
+	if resp := do(http.MethodPost, "/auth/token", `{"token":"not-a-token"}`, csrf); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("sign-in with a bad token = %d, want 401", resp.StatusCode)
+	}
+
+	resp = do(http.MethodPost, "/auth/token", string(body), csrf)
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("sign-in = %d %s", resp.StatusCode, b)
+	}
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("no session cookie")
+	}
+	resp = do(http.MethodGet, "/api/session", "", nil, cookies...)
+	var info SessionInfo
+	_ = json.NewDecoder(resp.Body).Decode(&info)
+	if want := "system:serviceaccount:" + ns + ":pasted"; resp.StatusCode != http.StatusOK || info.Username != want || info.Name != want {
+		t.Errorf("session = %d %+v, want %s", resp.StatusCode, info, want)
+	}
+	var s Session
+	req := httptest.NewRequest(http.MethodGet, "http://desk/", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	if err := a.sealer.ReadCookie(req, sessionCookie, &s); err != nil {
+		t.Fatal(err)
+	}
+	// userToken asks for an hour; the session must not outlive the token.
+	if until := time.Until(s.Expiry); until > time.Hour+time.Minute || until < 50*time.Minute {
+		t.Errorf("session expires in %v, want the token's expiry (about 1h)", until)
+	}
+}
+
+func TestTokenExpiry(t *testing.T) {
+	jwt := func(payload string) string {
+		return "e30." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".sig"
+	}
+	tests := []struct {
+		name  string
+		token string
+		want  int64
+		ok    bool
+	}{
+		{"jwt with exp", jwt(`{"exp":1700000000}`), 1700000000, true},
+		{"jwt without exp", jwt(`{"sub":"x"}`), 0, false},
+		{"not a jwt", "static-token", 0, false},
+		{"bad payload", "a.!!!.c", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := tokenExpiry(tt.token)
+			if ok != tt.ok || (ok && got.Unix() != tt.want) {
+				t.Errorf("tokenExpiry() = %v, %v; want %d, %v", got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+func TestNewAuthNeedsAMethod(t *testing.T) {
+	if _, err := NewAuth(context.Background(), AuthConfig{}, newSealer(t)); err == nil {
+		t.Error("NewAuth with no sign-in method succeeded")
 	}
 }

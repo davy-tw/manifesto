@@ -351,14 +351,46 @@ async function mediaView(ns) {
 
 // --- start -------------------------------------------------------------------------
 
+// signInPage offers the sign-in methods desk is set up with.
+async function signInPage() {
+  const methods = await api.signInMethods().catch(() => ({}));
+  const parts = [h('h1', {}, 'Manifesto desk')];
+  if (methods.oidc) parts.push(h('p', {}, h('a', { class: 'button primary', href: '/auth/login' }, 'Sign in')));
+  if (methods.token) {
+    const token = h('textarea', {
+      id: 'token', rows: 4, required: true, autocomplete: 'off', spellcheck: 'false',
+      placeholder: 'kubectl create token <name> -n <namespace> --duration=8h',
+    });
+    const status = h('div', {});
+    const send = async (e) => {
+      e.preventDefault();
+      try {
+        await api.signInWithToken(token.value);
+        location.reload();
+      } catch (err) {
+        status.replaceChildren(notice(err.message || String(err)));
+      }
+    };
+    parts.push(
+      h('form', { class: 'token-signin', onsubmit: send },
+        h('label', { for: 'token' }, methods.oidc ? 'Or sign in with a Kubernetes token' : 'Sign in with a Kubernetes token'),
+        token,
+        h('button', { type: 'submit', class: methods.oidc ? '' : 'primary' }, 'Sign in with token'),
+        status),
+    );
+  }
+  if (!methods.oidc && !methods.token) {
+    parts.push(notice('Sign-in is not set up on this desk. Ask your administrator.', 'info'));
+  }
+  document.body.replaceChildren(h('main', { class: 'signin' }, ...parts));
+}
+
 async function start() {
   let me;
   try {
     me = await api.session();
   } catch {
-    document.body.replaceChildren(
-      h('main', { class: 'signin' }, h('h1', {}, 'Manifesto desk'), h('a', { class: 'button primary', href: '/auth/login' }, 'Sign in')),
-    );
+    await signInPage();
     return;
   }
   document.getElementById('who').textContent = me.name || me.username;

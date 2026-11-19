@@ -31,6 +31,7 @@ import (
 
 func main() {
 	var addr, publicURL, issuer, clientID, scopes, keyFile string
+	var tokenSignIn bool
 	flag.StringVar(&addr, "bind-address", ":8080", "The address desk listens on.")
 	flag.StringVar(&publicURL, "public-url", "", "desk's public URL, e.g. https://desk.example.io (required).")
 	flag.StringVar(&issuer, "oidc-issuer", "",
@@ -40,6 +41,9 @@ func main() {
 	flag.StringVar(&scopes, "oidc-scopes", "openid,email,profile",
 		"Comma-separated scopes. Add offline_access (or your provider's equivalent) for refresh tokens, "+
 			"and groups if your provider needs it.")
+	flag.BoolVar(&tokenSignIn, "token-sign-in", false,
+		"Let users sign in by pasting a token the API server accepts (e.g. from kubectl create token). "+
+			"Sessions last until the token expires and cannot be refreshed.")
 	flag.StringVar(&keyFile, "session-key-file", "/etc/desk/session/key",
 		"File with the 32-byte key (or 64 hex characters) that encrypts session cookies.")
 	opts := zap.Options{Development: true}
@@ -58,8 +62,9 @@ func main() {
 	}
 	ctx := ctrl.SetupSignalHandler()
 	var auth *desk.Auth
-	if issuer == "" {
-		log.Info("No --oidc-issuer: browser sign-in is off; only API clients with bearer tokens are served")
+	if issuer == "" && !tokenSignIn {
+		log.Info("No --oidc-issuer or --token-sign-in: browser sign-in is off; " +
+			"only API clients with bearer tokens are served")
 	} else {
 		key, err := readKey(keyFile)
 		if err != nil {
@@ -75,6 +80,7 @@ func main() {
 			ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 			RedirectURL:  strings.TrimSuffix(public.String(), "/") + "/auth/callback",
 			Scopes:       strings.Split(scopes, ","),
+			TokenSignIn:  tokenSignIn,
 			Secure:       public.Scheme == "https",
 		}, sealer); err != nil {
 			fail(err, "Cannot set up OIDC")
