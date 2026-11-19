@@ -278,3 +278,24 @@ func TestTaxonomyChangeInvalidatesPages(t *testing.T) {
 		t.Error("ETag did not change")
 	}
 }
+
+func TestPrintsInPages(t *testing.T) {
+	cover := v1.Print{ObjectMeta: meta("cover"), Status: v1.PrintStatus{Phase: v1.PrintPending}}
+	d := dispatch("hello", v1.PhasePublished, t0)
+	d.Spec.Cover = "print:cover"
+	d.Spec.Content.Body = "![inline](print:cover)"
+	b := newBuilder(render.DefaultTheme())
+
+	snap := b.Build(Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: []v1.Dispatch{d}, Prints: []v1.Print{cover}}, nil)
+	if page := body(t, get(t, snap, host, "/posts/hello", nil)); strings.Contains(page, "<img") {
+		t.Errorf("a Pending Print must not be shown:\n%s", page)
+	}
+
+	cover.ResourceVersion = "2"
+	cover.Status = v1.PrintStatus{Phase: v1.PrintReady, URL: "https://media.example.io/u/sha256/c.png"}
+	snap2 := b.Build(Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: []v1.Dispatch{d}, Prints: []v1.Print{cover}}, snap)
+	page := body(t, get(t, snap2, host, "/posts/hello", nil))
+	if strings.Count(page, `src="https://media.example.io/u/sha256/c.png"`) != 2 {
+		t.Errorf("a Ready Print must appear as cover and inline image:\n%s", page)
+	}
+}

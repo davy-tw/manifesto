@@ -48,7 +48,7 @@ func TestMarkdown(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Markdown(tt.src)
+			got, err := Markdown(tt.src, nil)
 			if err != nil {
 				t.Fatalf("Markdown() error = %v", err)
 			}

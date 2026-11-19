@@ -1,6 +1,7 @@
 {{ define "title" }}{{ .Dispatch.Title }} · {{ .Gazette.Title }}{{ end }}
 {{ define "content" }}
 <article>
+{{ with .Dispatch.Cover }}<img class="cover" src="{{ . }}" alt="{{ $.Dispatch.CoverAlt }}">{{ end }}
 <h1>{{ .Dispatch.Title }}</h1>
 <p class="meta">
 {{ with .Dispatch.PublishedAt }}<time datetime="{{ date "2006-01-02T15:04:05Z07:00" . }}">{{ date "2006-01-02" . }}</time>{{ end }}

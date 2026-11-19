@@ -9,7 +9,7 @@
 </head>
 <body>
 <header>
-<a class="site" href="/">{{ .Gazette.Title }}</a>
+<a class="site" href="/">{{ with .Gazette.Logo }}<img class="logo" src="{{ . }}" alt="">{{ end }}{{ .Gazette.Title }}</a>
 {{ with .Gazette.Tagline }}<p class="tagline">{{ . }}</p>{{ end }}
 </header>
 <main>

@@ -18,6 +18,7 @@ rules:
   - stamps
   - typesets
   - clustertypesets
+  - prints
   verbs:
   - get
   - list

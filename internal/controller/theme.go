@@ -77,6 +77,16 @@ func taxonomyFor(ctx context.Context, c client.Client, d *v1.Dispatch, scribe *v
 		Sections: map[string]*v1.Section{},
 		Stamps:   map[string]*v1.Stamp{},
 		Scribes:  map[string]*v1.Scribe{},
+		Prints:   map[string]*v1.Print{},
+	}
+	for _, name := range render.PrintRefs(d) {
+		var p v1.Print
+		switch err := c.Get(ctx, types.NamespacedName{Namespace: d.Namespace, Name: name}, &p); {
+		case err == nil:
+			tax.Prints[name] = &p
+		case !apierrors.IsNotFound(err):
+			return tax, err
+		}
 	}
 	if scribe != nil {
 		tax.Scribes[scribe.Name] = scribe
