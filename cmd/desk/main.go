@@ -33,7 +33,8 @@ func main() {
 	var addr, publicURL, issuer, clientID, scopes, keyFile string
 	flag.StringVar(&addr, "bind-address", ":8080", "The address desk listens on.")
 	flag.StringVar(&publicURL, "public-url", "", "desk's public URL, e.g. https://desk.example.io (required).")
-	flag.StringVar(&issuer, "oidc-issuer", "", "OIDC issuer URL; the API server must trust the same issuer (required).")
+	flag.StringVar(&issuer, "oidc-issuer", "",
+		"OIDC issuer URL; the API server must trust the same issuer. Empty serves API clients with bearer tokens only.")
 	flag.StringVar(&clientID, "oidc-client-id", "manifesto-desk",
 		"OIDC client ID; the API server's audience for desk's tokens.")
 	flag.StringVar(&scopes, "oidc-scopes", "openid,email,profile",
@@ -55,29 +56,29 @@ func main() {
 	if err != nil || public.Host == "" {
 		fail(errors.New("--public-url is required"), "Invalid configuration")
 	}
-	if issuer == "" {
-		fail(errors.New("--oidc-issuer is required"), "Invalid configuration")
-	}
-	key, err := readKey(keyFile)
-	if err != nil {
-		fail(err, "Cannot read the session key")
-	}
-	sealer, err := desk.NewSealer(key)
-	if err != nil {
-		fail(err, "Invalid session key")
-	}
-
 	ctx := ctrl.SetupSignalHandler()
-	auth, err := desk.NewAuth(ctx, desk.AuthConfig{
-		Issuer: issuer, ClientID: clientID,
-		// The secret comes from the environment so it never shows in the process list.
-		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
-		RedirectURL:  strings.TrimSuffix(public.String(), "/") + "/auth/callback",
-		Scopes:       strings.Split(scopes, ","),
-		Secure:       public.Scheme == "https",
-	}, sealer)
-	if err != nil {
-		fail(err, "Cannot set up OIDC")
+	var auth *desk.Auth
+	if issuer == "" {
+		log.Info("No --oidc-issuer: browser sign-in is off; only API clients with bearer tokens are served")
+	} else {
+		key, err := readKey(keyFile)
+		if err != nil {
+			fail(err, "Cannot read the session key")
+		}
+		sealer, err := desk.NewSealer(key)
+		if err != nil {
+			fail(err, "Invalid session key")
+		}
+		if auth, err = desk.NewAuth(ctx, desk.AuthConfig{
+			Issuer: issuer, ClientID: clientID,
+			// The secret comes from the environment so it never shows in the process list.
+			ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
+			RedirectURL:  strings.TrimSuffix(public.String(), "/") + "/auth/callback",
+			Scopes:       strings.Split(scopes, ","),
+			Secure:       public.Scheme == "https",
+		}, sealer); err != nil {
+			fail(err, "Cannot set up OIDC")
+		}
 	}
 
 	scheme := runtime.NewScheme()

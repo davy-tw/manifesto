@@ -28,6 +28,8 @@ var (
 	heraldImage = "example.com/manifesto-herald:v0.0.1"
 	// darkroomImage is the darkroom (media store) image to be built and loaded for testing.
 	darkroomImage = "example.com/manifesto-darkroom:v0.0.1"
+	// deskImage is the desk (authors' web UI) image to be built and loaded for testing.
+	deskImage = "example.com/manifesto-desk:v0.0.1"
 	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
 	shouldCleanupCertManager = false
 )
@@ -60,6 +62,11 @@ var _ = BeforeSuite(func() {
 	_, err = utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the darkroom image")
 
+	By("building the desk image")
+	cmd = exec.Command("make", "docker-build", "COMPONENT=desk", fmt.Sprintf("IMG=%s", deskImage))
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the desk image")
+
 	By("loading the images into the " + utils.Provider() + " cluster")
 	err = utils.LoadImageToCluster(managerImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image")
@@ -67,6 +74,8 @@ var _ = BeforeSuite(func() {
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the herald image")
 	err = utils.LoadImageToCluster(darkroomImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the darkroom image")
+	err = utils.LoadImageToCluster(deskImage)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the desk image")
 
 	configureKubectlKubeRC()
 	setupCertManager()

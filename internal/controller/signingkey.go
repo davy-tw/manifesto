@@ -27,6 +27,17 @@ import (
 // put a new one under "current": darkroom accepts both until the old one is
 // removed.
 func EnsureSigningKey(ctx context.Context, c client.Client, secret types.NamespacedName) ([]byte, error) {
+	return EnsureKey(ctx, c, secret, signing.CurrentKey)
+}
+
+// DeskSessionKey is the data key of the Secret holding desk's session key.
+const DeskSessionKey = "key"
+
+// EnsureKey returns the random 32-byte key stored under dataKey in secret,
+// creating the Secret first if it does not exist. press does this for the
+// components that hold no RBAC of their own: darkroom's signing key and
+// desk's session key.
+func EnsureKey(ctx context.Context, c client.Client, secret types.NamespacedName, dataKey string) ([]byte, error) {
 	var s corev1.Secret
 	err := c.Get(ctx, secret, &s)
 	if apierrors.IsNotFound(err) {
@@ -39,7 +50,7 @@ func EnsureSigningKey(ctx context.Context, c client.Client, secret types.Namespa
 				Namespace: secret.Namespace, Name: secret.Name,
 				Labels: map[string]string{labelManagedBy: v1.FieldManagerPress},
 			},
-			Data: map[string][]byte{signing.CurrentKey: key},
+			Data: map[string][]byte{dataKey: key},
 		}
 		err = c.Create(ctx, &s)
 		if apierrors.IsAlreadyExists(err) {
@@ -50,9 +61,9 @@ func EnsureSigningKey(ctx context.Context, c client.Client, secret types.Namespa
 	if err != nil {
 		return nil, err
 	}
-	key := s.Data[signing.CurrentKey]
+	key := s.Data[dataKey]
 	if len(key) == 0 {
-		return nil, apierrors.NewBadRequest("Secret " + secret.String() + " has no \"" + signing.CurrentKey + "\" key")
+		return nil, apierrors.NewBadRequest("Secret " + secret.String() + " has no \"" + dataKey + "\" key")
 	}
 	return key, nil
 }

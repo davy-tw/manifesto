@@ -6,6 +6,8 @@ IMG ?= controller:latest
 HERALD_IMG ?= herald:latest
 # DARKROOM_IMG is the image for darkroom, the media store.
 DARKROOM_IMG ?= darkroom:latest
+# DESK_IMG is the image for desk, the authors' web UI.
+DESK_IMG ?= desk:latest
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -90,6 +92,10 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
 			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
 	esac
+
+.PHONY: test-ui
+test-ui: setup-envtest ## Drive desk in Chromium with Playwright (needs Node.js; run "npm ci" and "npx playwright install chromium" in internal/desk/uitest first).
+	DESK_UI_TEST=1 KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test ./internal/desk -run TestUI -v
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
@@ -194,6 +200,7 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	cd config/herald && "$(KUSTOMIZE)" edit set image herald=${HERALD_IMG}
 	cd config/darkroom && "$(KUSTOMIZE)" edit set image darkroom=${DARKROOM_IMG}
+	cd config/desk && "$(KUSTOMIZE)" edit set image desk=${DESK_IMG}
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
 
 ##@ Deployment
@@ -217,6 +224,7 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	cd config/herald && "$(KUSTOMIZE)" edit set image herald=${HERALD_IMG}
 	cd config/darkroom && "$(KUSTOMIZE)" edit set image darkroom=${DARKROOM_IMG}
+	cd config/desk && "$(KUSTOMIZE)" edit set image desk=${DESK_IMG}
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
 
 .PHONY: undeploy

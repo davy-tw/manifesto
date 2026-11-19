@@ -116,7 +116,8 @@ k3s 用 containerd。沒有 registry 時，可以把 image 直接匯入節點：
 make docker-build IMG=manifesto-press:dev
 make docker-build COMPONENT=herald IMG=manifesto-herald:dev
 make docker-build COMPONENT=darkroom IMG=manifesto-darkroom:dev
-docker save manifesto-press:dev manifesto-herald:dev manifesto-darkroom:dev | sudo k3s ctr images import -
+make docker-build COMPONENT=desk IMG=manifesto-desk:dev
+docker save manifesto-press:dev manifesto-herald:dev manifesto-darkroom:dev manifesto-desk:dev | sudo k3s ctr images import -
 ```
 
 在 `config/manager/manager.yaml` 的 press 參數加上：
@@ -131,7 +132,8 @@ docker save manifesto-press:dev manifesto-herald:dev manifesto-darkroom:dev | su
 然後部署：
 
 ```sh
-make deploy IMG=manifesto-press:dev HERALD_IMG=manifesto-herald:dev DARKROOM_IMG=manifesto-darkroom:dev
+make deploy IMG=manifesto-press:dev HERALD_IMG=manifesto-herald:dev DARKROOM_IMG=manifesto-darkroom:dev \
+  DESK_IMG=manifesto-desk:dev
 ```
 
 `gateway` 模式不會建立 Certificate，所以不用設定 `--cluster-issuer`。
@@ -170,9 +172,66 @@ spec:
 
 再建立 ClusterArchive，`publicURL: https://media.blog.example.io`。
 
+## 8. 管理介面（desk）與 OIDC
+
+desk 用使用者本人的 OIDC ID token 呼叫 API server，所以 k3s 的 API server 要信任 OIDC 提供者。在 OIDC 提供者註冊一個 client：client ID `manifesto-desk`，redirect URL `https://desk.blog.example.io/auth/callback`，並讓 ID token 帶 `email` 與 `groups` claim。
+
+把 AuthenticationConfiguration 放到 server 節點上：
+
+```yaml
+# /etc/rancher/k3s/authn.yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: https://auth.example.io
+    audiences: [manifesto-desk]
+  claimMappings:
+    username: { claim: email, prefix: "oidc:" }
+    groups:   { claim: groups, prefix: "oidc:" }
+```
+
+在 `/etc/rancher/k3s/config.yaml` 加上，然後重新啟動 k3s（`systemctl restart k3s`）：
+
+```yaml
+kube-apiserver-arg:
+  - authentication-config=/etc/rancher/k3s/authn.yaml
+```
+
+API server 會定期重新讀取這個檔案，之後改 issuer 或 claim 對應不用再重啟。用 `kubectl auth whoami`（帶上 OIDC token）可以確認對應出來的使用者名稱與群組。
+
+設定 desk：在 `config/desk/deployment.yaml` 把 `--public-url` 改成 `https://desk.blog.example.io`，打開 `--oidc-issuer=https://auth.example.io`。confidential client 再建立 client secret：
+
+```sh
+kubectl -n manifesto-system create secret generic manifesto-desk-oidc --from-literal=clientSecret=<secret>
+```
+
+替 desk 建一條 HTTPRoute（同樣用萬用字元憑證）。desk 的 session cookie 只走 HTTPS，所以要從 `websecure` 連：
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: desk
+  namespace: manifesto-system
+spec:
+  parentRefs:
+  - {name: manifesto, namespace: kube-system, sectionName: websecure}
+  hostnames: ["desk.blog.example.io"]
+  rules:
+  - backendRefs:
+    - {name: manifesto-desk, port: 80}
+```
+
+最後用 RoleBinding 把群組綁到角色（見 README 的「權限」）：
+
+```sh
+kubectl create rolebinding editors -n blog-alice --clusterrole=manifesto-editor --group=oidc:blog-alice-editors
+```
+
 ## CI 上的對應測試
 
-`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 3 步與第 5 步設定（只用 HTTP listener，不測 TLS），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 讀得到文章，並上傳一個 Print 經過 darkroom 存取。設定檔在 `test/e2e/k3d/`。
+`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 3 步與第 5 步設定（只用 HTTP listener，不測 TLS），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 讀得到文章，並上傳一個 Print 經過 darkroom 存取。desk 以 ServiceAccount token 代替 OIDC token，確認它用呼叫者的權限讀寫與預覽（OIDC 登入流程由 envtest 與 Playwright 的 `make test-ui` 涵蓋）。設定檔在 `test/e2e/k3d/`。
 
 ## 之後的里程碑要注意的地方
 

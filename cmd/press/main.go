@@ -112,6 +112,9 @@ func main() {
 	flag.StringVar(&darkroomSecret, "darkroom-secret", "manifesto-darkroom-keys",
 		"Secret, in press's namespace, holding the key that signs darkroom requests. Created if missing.")
 	flag.DurationVar(&media.UploadTTL, "upload-ttl", 5*time.Minute, "How long a Print's upload URL stays valid.")
+	var deskSecret string
+	flag.StringVar(&deskSecret, "desk-session-secret", "manifesto-desk-session",
+		"Secret, in press's namespace, with the key desk encrypts session cookies with. Created if missing; empty skips.")
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	if ns, name, ok := strings.Cut(heraldService, "/"); ok {
@@ -232,14 +235,18 @@ func main() {
 		namespace = "manifesto-system"
 	}
 	media.Namespace = namespace
-	if media.DarkroomURL != "" {
+	if media.DarkroomURL != "" || deskSecret != "" {
 		c, err := client.New(mgr.GetConfig(), client.Options{Scheme: scheme})
-		if err == nil {
+		if err == nil && media.DarkroomURL != "" {
 			media.SigningKey, err = controller.EnsureSigningKey(context.Background(), c,
 				types.NamespacedName{Namespace: namespace, Name: darkroomSecret})
 		}
+		if err == nil && deskSecret != "" {
+			_, err = controller.EnsureKey(context.Background(), c,
+				types.NamespacedName{Namespace: namespace, Name: deskSecret}, controller.DeskSessionKey)
+		}
 		if err != nil {
-			setupLog.Error(err, "Failed to set up the darkroom signing key")
+			setupLog.Error(err, "Failed to set up the darkroom and desk keys")
 			os.Exit(1)
 		}
 	}

@@ -38,11 +38,27 @@ curl -H 'Host: alice.localtest.me' http://localhost:8080/posts/hello-k8s
 make docker-build docker-push IMG=<registry>/manifesto-press:<tag>
 make docker-build docker-push COMPONENT=herald IMG=<registry>/manifesto-herald:<tag>
 make docker-build docker-push COMPONENT=darkroom IMG=<registry>/manifesto-darkroom:<tag>
+make docker-build docker-push COMPONENT=desk IMG=<registry>/manifesto-desk:<tag>
 make deploy IMG=<registry>/manifesto-press:<tag> HERALD_IMG=<registry>/manifesto-herald:<tag> \
-  DARKROOM_IMG=<registry>/manifesto-darkroom:<tag>
+  DARKROOM_IMG=<registry>/manifesto-darkroom:<tag> DESK_IMG=<registry>/manifesto-desk:<tag>
 ```
 
-herald 的 Service 是 `manifesto-system/manifesto-herald`。
+herald 的 Service 是 `manifesto-system/manifesto-herald`，desk 的是 `manifesto-system/manifesto-desk`。
+
+### desk（管理介面）
+
+desk 以使用者本人的 token 呼叫 API server，本身沒有任何 RBAC 權限。使用者透過 OIDC 登入，所以 API server 要信任同一個 OIDC 提供者（設定見 `docs/design.md` 的「OIDC 綁定」，k3s 見 `docs/k3s.md`）。
+
+`config/desk/deployment.yaml` 的參數：
+
+| 參數 | 說明 |
+|---|---|
+| `--public-url` | desk 對外的網址（必填），OIDC redirect URL 是 `<public-url>/auth/callback` |
+| `--oidc-issuer` | OIDC 提供者；不設定時只接受 `Authorization: Bearer` 的請求 |
+| `--oidc-client-id` | 預設 `manifesto-desk`，必須在 API server 的 `audiences` 裡 |
+| `--oidc-scopes` | 預設 `openid,email,profile`；提供者要另外要求才給 `groups` 時加上去 |
+
+client secret 放在 Secret `manifesto-desk-oidc` 的 `clientSecret`（public client 可以不建）。session cookie 的加密金鑰由 press 自動建立在 Secret `manifesto-desk-session`。
 
 ### 權限
 
