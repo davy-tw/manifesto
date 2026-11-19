@@ -60,7 +60,8 @@ func (s *Server) Handler() http.Handler {
 		s.Kube.Proxy(tokenOf).ServeHTTP(w, r)
 	}))
 	if s.UI != nil {
-		mux.Handle("GET /", s.ui())
+		// Not "GET /": that would conflict with the method-less /k8s/.
+		mux.Handle("/", s.ui())
 	}
 	return securityHeaders(mux)
 }
@@ -241,6 +242,11 @@ func writeJSON(w http.ResponseWriter, v any) {
 func (s *Server) ui() http.Handler {
 	files := http.FileServerFS(s.UI)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
 		p := strings.TrimPrefix(r.URL.Path, "/")
 		if p != "" {
 			if _, err := fs.Stat(s.UI, p); err == nil {

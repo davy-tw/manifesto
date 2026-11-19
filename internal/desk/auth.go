@@ -49,6 +49,7 @@ type Auth struct {
 	verifier *oidc.IDTokenVerifier
 	sealer   *Sealer
 	secure   bool
+	client   *http.Client
 	// SessionMaxAge bounds how long a session cookie lives (default 12h).
 	SessionMaxAge time.Duration
 }
@@ -63,10 +64,15 @@ type AuthConfig struct {
 	Scopes      []string
 	// Secure marks cookies Secure; true unless desk is served over plain HTTP.
 	Secure bool
+	// HTTPClient talks to the provider; nil uses the default client.
+	HTTPClient *http.Client
 }
 
 // NewAuth discovers the issuer and returns an Auth.
 func NewAuth(ctx context.Context, cfg AuthConfig, sealer *Sealer) (*Auth, error) {
+	if cfg.HTTPClient != nil {
+		ctx = oidc.ClientContext(ctx, cfg.HTTPClient)
+	}
 	provider, err := oidc.NewProvider(ctx, cfg.Issuer)
 	if err != nil {
 		return nil, fmt.Errorf("discovering OIDC issuer %s: %w", cfg.Issuer, err)
@@ -83,7 +89,16 @@ func NewAuth(ctx context.Context, cfg AuthConfig, sealer *Sealer) (*Auth, error)
 		verifier: provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
 		sealer:   sealer,
 		secure:   cfg.Secure,
+		client:   cfg.HTTPClient,
 	}, nil
+}
+
+// ctx carries the provider HTTP client, for the token exchange and refresh.
+func (a *Auth) ctx(r *http.Request) context.Context {
+	if a.client == nil {
+		return r.Context()
+	}
+	return oidc.ClientContext(r.Context(), a.client)
 }
 
 func (a *Auth) maxAge() time.Duration {
@@ -135,12 +150,12 @@ func (a *Auth) Callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sign-in state mismatch", http.StatusBadRequest)
 		return
 	}
-	tok, err := a.oauth.Exchange(r.Context(), r.URL.Query().Get("code"), oauth2.VerifierOption(st.Verifier))
+	tok, err := a.oauth.Exchange(a.ctx(r), r.URL.Query().Get("code"), oauth2.VerifierOption(st.Verifier))
 	if err != nil {
 		http.Error(w, "sign-in failed", http.StatusUnauthorized)
 		return
 	}
-	sess, err := a.session(r.Context(), tok, st.Nonce)
+	sess, err := a.session(a.ctx(r), tok, st.Nonce)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
@@ -200,11 +215,11 @@ func (a *Auth) Session(w http.ResponseWriter, r *http.Request) (*Session, error)
 	if s.RefreshToken == "" {
 		return nil, errNoSession
 	}
-	tok, err := a.oauth.TokenSource(r.Context(), &oauth2.Token{RefreshToken: s.RefreshToken}).Token()
+	tok, err := a.oauth.TokenSource(a.ctx(r), &oauth2.Token{RefreshToken: s.RefreshToken}).Token()
 	if err != nil {
 		return nil, errNoSession
 	}
-	fresh, err := a.session(r.Context(), tok, "")
+	fresh, err := a.session(a.ctx(r), tok, "")
 	if err != nil {
 		return nil, errNoSession
 	}
