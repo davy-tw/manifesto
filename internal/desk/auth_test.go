@@ -41,18 +41,28 @@ type fakeIssuer struct {
 
 func newFakeIssuer(t *testing.T) *fakeIssuer {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	f, err := startFakeIssuer()
 	if err != nil {
 		t.Fatal(err)
+	}
+	t.Cleanup(f.Close)
+	return f
+}
+
+// startFakeIssuer serves the provider over TLS, as the API server requires
+// for issuers it trusts.
+func startFakeIssuer() (*fakeIssuer, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
 	}
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jose.JSONWebKey{Key: key, KeyID: "k1"}}, nil)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	f := &fakeIssuer{key: key, signer: signer, codes: map[string]string{}, lifetime: time.Hour}
 	mux := http.NewServeMux()
-	f.Server = httptest.NewServer(mux)
-	t.Cleanup(f.Close)
+	f.Server = httptest.NewTLSServer(mux)
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"issuer": f.URL, "authorization_endpoint": f.URL + "/authorize", "token_endpoint": f.URL + "/token",
@@ -96,24 +106,27 @@ func newFakeIssuer(t *testing.T) *fakeIssuer {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "at", "token_type": "Bearer", "expires_in": 3600,
-			"refresh_token": "rt", "id_token": f.idToken(t, nonce),
+			"refresh_token": "rt", "id_token": f.idToken(nonce),
 		})
 	})
-	return f
+	return f, nil
 }
 
-func (f *fakeIssuer) idToken(t *testing.T, nonce string) string {
+// testGroups are the groups in every ID token the fake issuer signs.
+var testGroups = []string{"blog-alice-editors"}
+
+func (f *fakeIssuer) idToken(nonce string) string {
 	now := time.Now()
 	claims := map[string]any{
 		"iss": f.URL, "sub": "alice", "aud": "manifesto-desk", "email": "alice@example.io", "name": "Alice",
-		"iat": now.Unix(), "exp": now.Add(f.lifetime).Unix(),
+		"groups": testGroups, "iat": now.Unix(), "exp": now.Add(f.lifetime).Unix(),
 	}
 	if nonce != "" {
 		claims["nonce"] = nonce
 	}
 	raw, err := jwt.Signed(f.signer).Claims(claims).Serialize()
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
 	return raw
 }
@@ -121,6 +134,7 @@ func (f *fakeIssuer) idToken(t *testing.T, nonce string) string {
 // browser follows redirects within the test servers and keeps cookies.
 type browser struct {
 	t       *testing.T
+	issuer  *fakeIssuer
 	handler http.Handler
 	cookies map[string]*http.Cookie
 }
@@ -135,7 +149,8 @@ func (b *browser) do(method, target string, header http.Header) *http.Response {
 		}
 		rec := httptest.NewRecorder()
 		if strings.HasPrefix(target, "http") && !strings.HasPrefix(target, "http://desk") {
-			resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Get(target)
+			hc := &http.Client{Transport: b.issuer.Client().Transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			resp, err := hc.Get(target)
 			if err != nil {
 				b.t.Fatal(err)
 			}
@@ -167,6 +182,7 @@ func newAuth(t *testing.T, issuer *fakeIssuer) *Auth {
 	a, err := NewAuth(context.Background(), AuthConfig{
 		Issuer: issuer.URL, ClientID: "manifesto-desk", ClientSecret: "s",
 		RedirectURL: "http://desk/auth/callback", Scopes: []string{"openid", "email"}, Secure: true,
+		HTTPClient: issuer.Client(),
 	}, newSealer(t))
 	if err != nil {
 		t.Fatal(err)
@@ -174,12 +190,12 @@ func newAuth(t *testing.T, issuer *fakeIssuer) *Auth {
 	return a
 }
 
-func signIn(t *testing.T, a *Auth) *browser {
+func signIn(t *testing.T, issuer *fakeIssuer, a *Auth) *browser {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /auth/login", a.Login)
 	mux.HandleFunc("GET /auth/callback", a.Callback)
-	b := &browser{t: t, handler: mux, cookies: map[string]*http.Cookie{}}
+	b := &browser{t: t, issuer: issuer, handler: mux, cookies: map[string]*http.Cookie{}}
 	resp := b.do(http.MethodGet, "http://desk/auth/login", nil)
 	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
 		t.Fatalf("sign-in ended with %d, Location %q", resp.StatusCode, resp.Header.Get("Location"))
@@ -204,7 +220,7 @@ func sessionOf(t *testing.T, a *Auth, b *browser) (*Session, error) {
 func TestSignIn(t *testing.T) {
 	issuer := newFakeIssuer(t)
 	a := newAuth(t, issuer)
-	b := signIn(t, a)
+	b := signIn(t, issuer, a)
 
 	if _, ok := b.cookies[loginCookie]; ok {
 		t.Error("the login cookie must be cleared after the callback")
@@ -254,7 +270,7 @@ func TestSignInRejectsWrongNonce(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /auth/login", a.Login)
 	mux.HandleFunc("GET /auth/callback", a.Callback)
-	b := &browser{t: t, handler: mux, cookies: map[string]*http.Cookie{}}
+	b := &browser{t: t, issuer: issuer, handler: mux, cookies: map[string]*http.Cookie{}}
 	if resp := b.do(http.MethodGet, "http://desk/auth/login", nil); resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
@@ -267,7 +283,7 @@ func TestSessionRefresh(t *testing.T) {
 	issuer := newFakeIssuer(t)
 	issuer.lifetime = 10 * time.Second // already inside the 30s refresh window
 	a := newAuth(t, issuer)
-	b := signIn(t, a)
+	b := signIn(t, issuer, a)
 	first := b.cookies[sessionCookie].Value
 
 	s, err := sessionOf(t, a, b)

@@ -97,3 +97,24 @@ func TestSealerRejectsTamperingAndReplay(t *testing.T) {
 		t.Error("a short key was accepted")
 	}
 }
+
+// TestHandlerWithUI builds the full route table, as cmd/desk does, and
+// checks the app is served with its security headers.
+func TestHandlerWithUI(t *testing.T) {
+	h := (&Server{Kube: &Kube{}, UI: UI()}).Handler()
+	for path, want := range map[string]int{"/": 200, "/app.js": 200, "/ns/blog/dispatches": 200} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != want {
+			t.Errorf("GET %s = %d, want %d", path, rec.Code, want)
+		}
+		if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "default-src 'self'") {
+			t.Errorf("GET %s: missing CSP", path)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST / = %d, want 405", rec.Code)
+	}
+}

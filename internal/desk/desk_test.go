@@ -10,6 +10,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -17,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
@@ -41,8 +45,40 @@ const ns = "blog-alice"
 var (
 	admin  client.Client
 	desk   *httptest.Server
+	kube   *Kube
+	envCfg *rest.Config
+	issuer *fakeIssuer
 	scheme = runtime.NewScheme()
 )
+
+// trustIssuer writes a Structured Authentication Configuration that makes
+// the API server accept the fake issuer's ID tokens, as a real cluster
+// would trust the OIDC provider desk signs users in with.
+func trustIssuer(dir string) (string, error) {
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: issuer.Certificate().Raw})
+	cfg := fmt.Sprintf(`apiVersion: apiserver.config.k8s.io/v1
+kind: AuthenticationConfiguration
+jwt:
+- issuer:
+    url: %s
+    audiences: [manifesto-desk]
+    certificateAuthority: |
+%s
+  claimMappings:
+    username: {claim: email, prefix: "oidc:"}
+    groups: {claim: groups, prefix: "oidc:"}
+`, issuer.URL, indent(string(ca), "      "))
+	path := filepath.Join(dir, "authentication-config.yaml")
+	return path, os.WriteFile(path, []byte(cfg), 0o600)
+}
+
+func indent(s, prefix string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = prefix + l
+	}
+	return strings.Join(lines, "\n")
+}
 
 func TestMain(m *testing.M) {
 	for _, add := range []func(*runtime.Scheme) error{clientgoscheme.AddToScheme, v1.AddToScheme} {
@@ -50,10 +86,23 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 	}
+	var err error
+	if issuer, err = startFakeIssuer(); err != nil {
+		panic(err)
+	}
+	dir, err := os.MkdirTemp("", "desk-test")
+	if err != nil {
+		panic(err)
+	}
+	authConfig, err := trustIssuer(dir)
+	if err != nil {
+		panic(err)
+	}
 	env := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
 	}
+	env.ControlPlane.GetAPIServer().Configure().Set("authentication-config", authConfig)
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		if dirs, _ := filepath.Glob(filepath.Join("..", "..", "bin", "k8s", "*")); len(dirs) > 0 {
 			env.BinaryAssetsDirectory = dirs[0]
@@ -66,15 +115,17 @@ func TestMain(m *testing.M) {
 	if admin, err = client.New(cfg, client.Options{Scheme: scheme}); err != nil {
 		panic(err)
 	}
-	kube, err := NewKube(cfg, scheme)
-	if err != nil {
+	envCfg = cfg
+	if kube, err = NewKube(cfg, scheme); err != nil {
 		panic(err)
 	}
 	public, _ := url.Parse("http://desk.example.io")
 	desk = httptest.NewServer((&Server{Kube: kube, PublicURL: public, Log: logr.Discard()}).Handler())
 	code := m.Run()
 	desk.Close()
+	issuer.Close()
 	_ = env.Stop()
+	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }
 
@@ -261,7 +312,7 @@ func TestCookieSessionsNeedTheCSRFHeader(t *testing.T) {
 	a := newAuth(t, issuer)
 	public, _ := url.Parse("http://desk")
 	srv := (&Server{Auth: a, Kube: &Kube{}, PublicURL: public, Log: logr.Discard()}).Handler()
-	b := signIn(t, a)
+	b := signIn(t, issuer, a)
 	b.handler = srv
 
 	try := func(header http.Header) int {
@@ -284,5 +335,26 @@ func TestCookieSessionsNeedTheCSRFHeader(t *testing.T) {
 	// fails later only because the body is not a Dispatch).
 	if got := try(http.Header{CSRFHeader: {"1"}, "Origin": {"http://desk"}}); got != http.StatusBadRequest {
 		t.Errorf("same origin with the header: %d, want 400 from the handler", got)
+	}
+}
+
+// TestOIDCThroughTheAPIServer signs in with the provider, then lets desk
+// forward the ID token: the API server itself authenticates the user.
+func TestOIDCThroughTheAPIServer(t *testing.T) {
+	a := newAuth(t, issuer)
+	public, _ := url.Parse("http://desk")
+	srv := (&Server{Auth: a, Kube: kube, PublicURL: public, Log: logr.Discard()}).Handler()
+	b := signIn(t, issuer, a)
+	b.handler = srv
+
+	resp := b.do(http.MethodGet, "http://desk/api/session", nil)
+	body, _ := io.ReadAll(resp.Body)
+	var info SessionInfo
+	_ = json.Unmarshal(body, &info)
+	if resp.StatusCode != http.StatusOK || info.Username != "oidc:alice@example.io" || info.Name != "Alice" {
+		t.Fatalf("session = %d %s", resp.StatusCode, body)
+	}
+	if !slices.Contains(info.Groups, "oidc:blog-alice-editors") {
+		t.Errorf("groups = %v, want the provider's groups mapped with the oidc: prefix", info.Groups)
 	}
 }
