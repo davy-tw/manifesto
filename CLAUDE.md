@@ -78,6 +78,7 @@ M1（MVP）、M2（內容與網站）、M3（媒體，PVC 與 S3 後端）、M4�
 - herald：`internal/herald`（`build.go` 快照、`feed.go` Wire 與 sitemap、`handler.go` 路由）
 - desk：`internal/desk`（`auth.go` OIDC、`session.go` 加密 cookie、`kube.go` 代理與路徑白名單、`server.go` 路由與預覽、`ui/` 嵌入的 SPA）與 `cmd/desk`；press 與 desk 共用的主題與分類解析在 `internal/sitedata`
 - 角色：`config/rbac/manifesto_roles.yaml`（envtest 在 `test/rbac`）
+- mfctl：`internal/mfctl`（cobra；`typeset build`、`print upload`、`edition list|show|restore`，envtest 內跑 press 與 darkroom）與 `cmd/mfctl`
 - Edition：`internal/controller/edition_controller.go`（內容 digest 改變才建立 `<dispatch>-<n>`，保留 `--editions` 版，預設 20；spec 以 CEL 禁止修改）
 - 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 與 k3d（k3s + Traefik，`make test-e2e-k3d`，含 gateway 路由經過 Traefik 的驗證）上的 E2E 在 `test/e2e`，CI 兩者都跑；envtest 用的第三方 CRD 在 `test/crds`
 
@@ -91,6 +92,6 @@ S3 慣例：只用標準 S3 API（aws-sdk-go-v2，關閉非必要的 checksum he
 
 desk 慣例：用使用者本人的 token（OIDC ID token、`--token-sign-in` 貼上的 token，或 Bearer），沒有自己的 RBAC；代理有路徑白名單；cookie 寫入要帶 `X-Manifesto-Desk` header。測試：envtest 的 API server 以 `--authentication-config` 信任測試用 OIDC issuer；UI 用 Playwright（`make test-ui`）。
 
-下一步：M5 的 mfctl 與 Helm chart，之後在真實 k3s 部署測試。
+下一步：M5 的 Helm chart，之後在真實 k3s 部署測試。
 
 測試計畫：整套功能完成後才在真實的 k3s 環境部署測試；在那之前以 CI 上的 Kind 與 k3d E2E 為準。

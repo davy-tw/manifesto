@@ -344,6 +344,13 @@ status:
 - 還原：把舊版的 snapshot 複製回 Dispatch（desk 的 History、`mfctl edition restore`），這會成為新的一版，歷史不會被改寫
 - 一篇最多 512KB，20 版最多約 10MB 在 etcd；內容很長的站可以調低 `--editions`
 
+## mfctl（命令列工具）
+
+- 用使用者的 kubeconfig，和 desk 一樣不做權限判斷；寫入的 fieldManager 是 `manifesto-mfctl`
+- `typeset build DIR`：資料夾（平的，`*.html` 是模板、其他是文字資產）打包成 Typeset / ClusterTypeset 的 YAML，輸出前用 `internal/render` 解析一次
+- `print upload FILE`：算 sha256、以 Server-Side Apply 建立 Print、PUT 到 `status.uploadURL`、等 press 核對後 Ready；同 namespace 已有相同檔案就直接 Ready。只有一個 Archive / ClusterArchive 時自動選用
+- `edition list | show | restore`：restore 用帶 resourceVersion 的 merge patch，因為還原必須移除 Edition 沒有的欄位（apply 只會移除自己設定過的欄位），並在有人同時修改時拒絕而不是覆蓋
+
 ## desk（管理介面）
 
 - SPA + 後端；後端負責 OIDC 登入、session cookie，並把請求代理到 API server。SPA 不直接連 API server

@@ -150,11 +150,16 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build press and herald binaries.
+build: manifests generate fmt vet mfctl ## Build every component and mfctl.
 	go build -o bin/press ./cmd/press
 	go build -o bin/herald ./cmd/herald
 	go build -o bin/darkroom ./cmd/darkroom
 	go build -o bin/desk ./cmd/desk
+
+MFCTL_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+.PHONY: mfctl
+mfctl: ## Build the mfctl CLI into bin/mfctl (cross-compile with GOOS/GOARCH).
+	CGO_ENABLED=0 go build -ldflags "-X go.pkgs.davy.tw/manifesto/internal/mfctl.Version=$(MFCTL_VERSION)" -o bin/mfctl ./cmd/mfctl
 
 .PHONY: run
 run: manifests generate fmt vet ## Run press (the operator) from your host.

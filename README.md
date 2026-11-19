@@ -134,6 +134,24 @@ press 第一次啟動會在 `manifesto-system` 建立簽章用的 Secret `manife
 
 press 會在 Gazette 的 namespace 建立 `manifesto-<gazette>` 的 ListenerSet、HTTPRoute（以及 HTTP 轉 HTTPS 的 `-redirect`）和 Certificate，並在 herald 的 namespace 建立 ReferenceGrant。`kubectl get blog` 的 `Routed` condition 會顯示 Gateway 是否已經接手。
 
+## mfctl
+
+mfctl 是命令列工具，用你的 kubeconfig 連線，能做什麼由 RBAC 決定（和 desk 一樣）。`make mfctl` 建置到 `bin/mfctl`；`-n`、`--context`、`--kubeconfig` 和 kubectl 相同。
+
+```sh
+# 把主題資料夾（*.html 是模板，其他是文字資產，不能有子資料夾）打包成 Typeset，先在本機檢查能不能解析
+mfctl typeset build ./my-theme -n blog-alice | kubectl apply -f -
+mfctl typeset build ./my-theme --cluster --param accent=#c00 | kubectl apply -f -
+
+# 上傳媒體：建立 Print、上傳到 press 給的網址、等到 Ready；印出 print:<name> 與公開網址
+mfctl print upload ./photos/hero.jpg --alt "封面" -n blog-alice
+
+# 文章的修訂版本
+mfctl edition list hello-k8s -n blog-alice
+mfctl edition show hello-k8s 3 -n blog-alice      # 印出第 3 版的內文
+mfctl edition restore hello-k8s 3 -n blog-alice   # 把第 3 版的內容放回文章（會成為新的一版）
+```
+
 ## 開發
 
 ```sh
