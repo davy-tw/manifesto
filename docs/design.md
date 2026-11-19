@@ -344,13 +344,20 @@ status:
 - 還原：把舊版的 snapshot 複製回 Dispatch（desk 的 History、`mfctl edition restore`），這會成為新的一版，歷史不會被改寫
 - 為什麼限制大小：Edition 存在 etcd，整個叢集共用。一篇最多 512KB，只限版數的話一篇最多約 10MB；k3s 用內嵌 etcd 時預設上限 2 GiB，用滿後整個叢集變成唯讀（單節點預設的 SQLite 沒有這個上限）。2 MiB 是一般文章的 20 版，或最大文章的 4 版
 
+## mfctl（命令列工具）
+
+- 用使用者的 kubeconfig，和 desk 一樣不做權限判斷；寫入的 fieldManager 是 `manifesto-mfctl`
+- `typeset build DIR`：資料夾（平的，`*.html` 是模板、其他是文字資產）打包成 Typeset / ClusterTypeset 的 YAML，輸出前用 `internal/render` 解析一次
+- `print upload FILE`：算 sha256、以 Server-Side Apply 建立 Print、PUT 到 `status.uploadURL`、等 press 核對後 Ready；同 namespace 已有相同檔案就直接 Ready。只有一個 Archive / ClusterArchive 時自動選用
+- `edition list | show | restore`：restore 用帶 resourceVersion 的 merge patch，因為還原必須移除 Edition 沒有的欄位（apply 只會移除自己設定過的欄位），並在有人同時修改時拒絕而不是覆蓋
+
 ## desk（管理介面）
 
 - SPA + 後端；後端負責 OIDC 登入、session cookie，並把請求代理到 API server。SPA 不直接連 API server
 - Markdown 編輯與即時預覽：預覽呼叫共用的 `internal/render`，套用真正的主題
 - 透過 watch 即時顯示 `phase` 變化
 - 編輯器的 History 列出 Edition，可以把舊版載入編輯器，儲存後即還原
-- 編輯衝突以 `resourceVersion` 樂觀鎖偵測（API 回 409 時提示合併）；寫入用 Server-Side Apply，fieldManager 為 `manifesto-desk`
+- 編輯衝突以 `resourceVersion` 樂觀鎖偵測（API 回 409 時提示合併）；寫入用 Server-Side Apply，fieldManager 為 `manifesto-desk`，一律 `force=true`：`mfctl edition restore` 或 `kubectl edit` 改過的欄位屬於別的 field manager，不 force 的話作者存檔會被誤判為衝突；真正的並行編輯由 resourceVersion 擋下
 - 登入用 OIDC authorization code + PKCE；ID token 與 refresh token 以 AES-GCM 加密存在 cookie（金鑰由 press 建立在 Secret `manifesto-desk-session`），desk 不保存任何 session，可以多副本
 - 代理只轉送 Manifesto 需要的路徑（manifesto.davy.tw 資源、events、RoleBinding、SelfSubject*Review），其他回 404；用 cookie 的寫入必須帶 `X-Manifesto-Desk` header 且 Origin 相同，防止 CSRF
 - 也接受 `Authorization: Bearer`（不經 cookie），方便腳本與測試

@@ -102,6 +102,23 @@ const path = require('path');
     await page.getByText('Saved.').waitFor();
     await page.locator('.editions li', { hasText: 'Hello from the UI' }).nth(1).waitFor();
 
+    step('edit after mfctl restored an edition (no false conflict)');
+    // mfctl edition restore writes a merge patch as manifesto-mfctl, which
+    // then owns those fields; desk must still save over them.
+    await page.evaluate(async () => {
+      const r = await fetch('/k8s/apis/manifesto.davy.tw/v1alpha1/namespaces/blog-ui/dispatches/hello-ui?fieldManager=manifesto-mfctl', {
+        method: 'PATCH',
+        headers: { 'X-Manifesto-Desk': '1', 'Content-Type': 'application/merge-patch+json' },
+        body: JSON.stringify({ spec: { title: 'Restored by mfctl', summary: null } }),
+      });
+      if (!r.ok) throw new Error(`restore failed: ${r.status}`);
+    });
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('#f-title')?.value === 'Restored by mfctl');
+    await page.fill('#f-title', 'Edited after restore');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByText('Saved.').waitFor();
+
     step('sign in with a pasted token instead');
     const other = await browser.newContext({ viewport: { width: 1400, height: 900 } });
     const tp = await other.newPage();
@@ -116,7 +133,7 @@ const path = require('path');
     await tp.locator('#who', { hasText: 'system:serviceaccount:blog-ui:token-user' }).waitFor();
     await tp.fill('#ns', 'blog-ui');
     await tp.press('#ns', 'Enter');
-    await tp.getByRole('link', { name: 'Hello from the UI' }).waitFor();
+    await tp.getByRole('link', { name: 'Edited after restore' }).waitFor();
     await other.close();
     console.log('UI OK');
   } catch (e) {
