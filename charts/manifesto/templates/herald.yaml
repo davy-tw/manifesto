@@ -1,0 +1,59 @@
+{{- $h := .Values.herald }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: manifesto-herald
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "herald") | nindent 4 }}
+spec:
+  replicas: {{ $h.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      app.kubernetes.io/component: herald
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: manifesto
+        app.kubernetes.io/component: herald
+    spec:
+      serviceAccountName: manifesto-herald
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      {{- include "manifesto.podScheduling" (list $ $h) | nindent 6 }}
+      containers:
+      - name: herald
+        image: {{ include "manifesto.image" (list $ $h.image) }}
+        imagePullPolicy: {{ $h.image.pullPolicy }}
+        command: [/manager]
+        args: [--bind-address=:8080]
+        ports:
+        - {name: http, containerPort: 8080, protocol: TCP}
+        livenessProbe:
+          httpGet: {path: /healthz, port: http}
+          initialDelaySeconds: 5
+          periodSeconds: 20
+        readinessProbe:
+          httpGet: {path: /readyz, port: http}
+          periodSeconds: 5
+        resources:
+          {{- toYaml $h.resources | nindent 10 }}
+        securityContext:
+          {{- include "manifesto.containerSecurity" . | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: manifesto-herald
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "herald") | nindent 4 }}
+spec:
+  ports:
+  - {name: http, port: 80, protocol: TCP, targetPort: http}
+  selector:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: herald

@@ -26,12 +26,12 @@ const (
 	traefikService    = "traefik.kube-system.svc.cluster.local"
 )
 
-// pressRoutingArgs are the flags press runs with on k3d.
-var pressRoutingArgs = []string{
-	"--routing-mode=gateway",
-	"--gateway-name=manifesto",
-	"--gateway-namespace=kube-system",
-	"--gateway-section=web",
+// helmRoutingValues put press in gateway mode on k3d, as docs/k3s.md does.
+var helmRoutingValues = []string{
+	"press.routing.mode=gateway",
+	"press.routing.gatewayName=manifesto",
+	"press.routing.gatewayNamespace=kube-system",
+	"press.routing.gatewaySection=web",
 }
 
 func setupTraefikGateway() {
@@ -64,19 +64,26 @@ func setupTraefikGateway() {
 	}, 3*time.Minute, 5*time.Second).Should(Succeed(), "Traefik did not program the Gateway")
 }
 
-// enablePressRouting adds the gateway-mode flags to press and waits for the
-// rollout.
-func enablePressRouting() {
-	ops := make([]string, 0, len(pressRoutingArgs))
-	for _, a := range pressRoutingArgs {
-		ops = append(ops, `{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"`+a+`"}`)
-	}
-	_, err := utils.Run(exec.Command("kubectl", "patch", "deployment", "manifesto-controller-manager", "-n", namespace,
-		"--type=json", "-p", "["+strings.Join(ops, ",")+"]"))
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to enable routing in press")
-	_, err = utils.Run(exec.Command("kubectl", "rollout", "status", "deployment/manifesto-controller-manager",
-		"-n", namespace, "--timeout=3m"))
+// installWithHelm installs the chart with the images under test, in gateway
+// routing mode, and waits for press.
+func installWithHelm() {
+	_, err := utils.Run(exec.Command("make", "helm"))
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	set := append([]string{"desk.publicURL=http://desk.e2e.test"}, helmRoutingValues...)
+	for component, image := range map[string]string{
+		"press": managerImage, "herald": heraldImage, "darkroom": darkroomImage, "desk": deskImage,
+	} {
+		repo, tag, _ := strings.Cut(image[strings.LastIndex(image, "/")+1:], ":")
+		repo = image[:strings.LastIndex(image, "/")+1] + repo
+		set = append(set, component+".image.repository="+repo, component+".image.tag="+tag)
+	}
+	args := make([]string, 0, 8+2*len(set))
+	args = append(args, "install", "manifesto", "charts/manifesto", "-n", namespace, "--wait", "--timeout", "5m")
+	for _, s := range set {
+		args = append(args, "--set", s)
+	}
+	_, err = utils.Run(exec.Command("bin/helm", args...))
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install the Helm chart")
 }
 
 // expectServedThroughTraefik checks press routed the Gazette and that a

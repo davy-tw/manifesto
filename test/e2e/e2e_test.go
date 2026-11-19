@@ -53,20 +53,22 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
 
-		By("installing CRDs")
-		cmd = exec.Command("make", "install")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
-
-		By("deploying the controller-manager")
-		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage), fmt.Sprintf("HERALD_IMG=%s", heraldImage),
-			fmt.Sprintf("DARKROOM_IMG=%s", darkroomImage), fmt.Sprintf("DESK_IMG=%s", deskImage))
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
-
 		if utils.Provider() == utils.ProviderK3d {
-			By("enabling press's gateway routing mode for Traefik")
-			enablePressRouting()
+			// k3s, the first production target, is installed with the Helm
+			// chart in gateway routing mode for its Traefik (docs/k3s.md).
+			By("installing with the Helm chart")
+			installWithHelm()
+		} else {
+			By("installing CRDs")
+			cmd = exec.Command("make", "install")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
+
+			By("deploying the controller-manager")
+			cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage), fmt.Sprintf("HERALD_IMG=%s", heraldImage),
+				fmt.Sprintf("DARKROOM_IMG=%s", darkroomImage), fmt.Sprintf("DESK_IMG=%s", deskImage))
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 		}
 	})
 
@@ -82,7 +84,11 @@ var _ = Describe("Manager", Ordered, func() {
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
-		cmd = exec.Command("make", "undeploy")
+		if utils.Provider() == utils.ProviderK3d {
+			cmd = exec.Command("bin/helm", "uninstall", "manifesto", "-n", namespace, "--wait")
+		} else {
+			cmd = exec.Command("make", "undeploy")
+		}
 		_, _ = utils.Run(cmd)
 
 		By("uninstalling CRDs")

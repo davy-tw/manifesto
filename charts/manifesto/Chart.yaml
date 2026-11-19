@@ -1,0 +1,8 @@
+apiVersion: v2
+name: manifesto
+description: A Kubernetes-native blog engine. Posts are custom resources, an operator publishes them and Kubernetes RBAC decides who may write.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.33.0-0"
+keywords: [blog, operator, gateway-api]

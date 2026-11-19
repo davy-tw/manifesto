@@ -1,0 +1,5 @@
+{{- /*
+CRDs are templates rather than crds/, so that upgrades update them. They
+are kept on uninstall: deleting a CRD deletes every post.
+*/ -}}
+{{ include "manifesto.generated" (list $ "files/crds.yaml" (dict "helm.sh/resource-policy" "keep")) }}

@@ -351,6 +351,13 @@ status:
 - `print upload FILE`：算 sha256、以 Server-Side Apply 建立 Print、PUT 到 `status.uploadURL`、等 press 核對後 Ready；同 namespace 已有相同檔案就直接 Ready。只有一個 Archive / ClusterArchive 時自動選用
 - `edition list | show | restore`：restore 用帶 resourceVersion 的 merge patch，因為還原必須移除 Edition 沒有的欄位（apply 只會移除自己設定過的欄位），並在有人同時修改時拒絕而不是覆蓋
 
+## 安裝
+
+- Helm chart `charts/manifesto` 與 kustomize `config/default` 建立相同的資源與名稱（`manifesto-*`），一個叢集裝一次
+- chart 的 CRD 與 RBAC 不手寫：`make chart` 從 kustomize 的輸出產生 `charts/manifesto/files/`，CI 檢查有沒有過期；`test/chart` 比對兩者的物件、CRD、RBAC 與 Pod 設定
+- CRD 放在 templates（不是 `crds/`），升級時才會更新；CRD 和媒體 PVC 加上 `helm.sh/resource-policy: keep`
+- k3d 的 E2E 用 Helm 安裝（gateway 模式），Kind 的 E2E 用 kustomize
+
 ## desk（管理介面）
 
 - SPA + 後端；後端負責 OIDC 登入、session cookie，並把請求代理到 API server。SPA 不直接連 API server
@@ -359,6 +366,7 @@ status:
 - 編輯器的 History 列出 Edition，可以把舊版載入編輯器，儲存後即還原
 - 編輯衝突以 `resourceVersion` 樂觀鎖偵測（API 回 409 時提示合併）；寫入用 Server-Side Apply，fieldManager 為 `manifesto-desk`，一律 `force=true`：`mfctl edition restore` 或 `kubectl edit` 改過的欄位屬於別的 field manager，不 force 的話作者存檔會被誤判為衝突；真正的並行編輯由 resourceVersion 擋下
 - 登入用 OIDC authorization code + PKCE；ID token 與 refresh token 以 AES-GCM 加密存在 cookie（金鑰由 press 建立在 Secret `manifesto-desk-session`），desk 不保存任何 session，可以多副本
+- desk 以 volume 掛載這個 Secret：初次安裝時 press 啟動前，desk 的 Pod 會停在 ContainerCreating，press 建立 Secret 後 kubelet 自動重試，不需要安排啟動順序（`helm install --wait` 會等到兩者都 Ready）
 - 代理只轉送 Manifesto 需要的路徑（manifesto.davy.tw 資源、events、RoleBinding、SelfSubject*Review），其他回 404；用 cookie 的寫入必須帶 `X-Manifesto-Desk` header 且 Origin 相同，防止 CSRF
 - 也接受 `Authorization: Bearer`（不經 cookie），方便腳本與測試
 - 選用的 token 登入（`--token-sign-in`）：使用者貼上 API server 認得的 token（例如 ServiceAccount token），desk 以 SelfSubjectReview 確認後存進同一個加密 cookie；session 在 token 的 `exp` 或 12 小時到期，不能 refresh。登入請求同樣要求 CSRF header，避免別的網站讓訪客以別人的身分登入
@@ -384,7 +392,7 @@ status:
 2. **M2 內容與網站**（已完成）：Section、Stamp、Scribe、Typeset / ClusterTypeset、Wire 與 sitemap、分頁與篩選、HTTPRoute + cert-manager
 3. **M3 媒體**（已完成）：Print、Archive、darkroom（先 PVC driver，再 S3）
 4. **M4 管理介面**（已完成）：desk，以及 `proofreader`、`editor`、`publisher` 三個 ClusterRole
-5. **M5 補完**：Edition、mfctl、Helm chart
+5. **M5 補完**（已完成）：Edition、mfctl、Helm chart
 
 **待辦與未來功能**
 

@@ -1,0 +1,104 @@
+{{- $p := .Values.press }}
+{{- $r := $p.routing }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: manifesto-controller-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.labels" . | nindent 4 }}
+    control-plane: controller-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      control-plane: controller-manager
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        app.kubernetes.io/name: manifesto
+        control-plane: controller-manager
+    spec:
+      serviceAccountName: manifesto-controller-manager
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      {{- include "manifesto.podScheduling" (list $ $p) | nindent 6 }}
+      containers:
+      - name: manager
+        image: {{ include "manifesto.image" (list $ $p.image) }}
+        imagePullPolicy: {{ $p.image.pullPolicy }}
+        command: [/manager]
+        args:
+        - --metrics-bind-address=:8443
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        - --herald-service={{ .Release.Namespace }}/manifesto-herald
+        - --editions={{ $p.editions }}
+        - --edition-bytes={{ $p.editionBytes }}
+        - --upload-ttl={{ $p.uploadTTL }}
+        {{- if .Values.darkroom.enabled }}
+        - --darkroom-url=http://manifesto-darkroom.{{ .Release.Namespace }}.svc:8081
+        - --darkroom-claim={{ default "manifesto-media-data" .Values.darkroom.persistence.existingClaim }}
+        {{- else }}
+        - --darkroom-url=
+        {{- end }}
+        {{- if not .Values.desk.enabled }}
+        - --desk-session-secret=
+        {{- end }}
+        {{- with $r.gatewayName }}
+        - --gateway-name={{ . }}
+        - --gateway-namespace={{ required "press.routing.gatewayNamespace is required with gatewayName" $r.gatewayNamespace }}
+        - --routing-mode={{ $r.mode }}
+        {{- if eq $r.mode "gateway" }}
+        {{- with $r.gatewaySection }}
+        - --gateway-section={{ . }}
+        {{- end }}
+        {{- else }}
+        - --listener-https-port={{ $r.listenerHTTPSPort }}
+        - --listener-http-port={{ $r.listenerHTTPPort }}
+        {{- with $r.clusterIssuer }}
+        - --cluster-issuer={{ . }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- range $p.extraArgs }}
+        - {{ . }}
+        {{- end }}
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef: {fieldPath: metadata.namespace}
+        ports:
+        - {name: health, containerPort: 8081, protocol: TCP}
+        livenessProbe:
+          httpGet: {path: /healthz, port: 8081}
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet: {path: /readyz, port: 8081}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          {{- toYaml $p.resources | nindent 10 }}
+        securityContext:
+          {{- include "manifesto.containerSecurity" . | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: manifesto-controller-manager-metrics-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.labels" . | nindent 4 }}
+    control-plane: controller-manager
+spec:
+  ports:
+  - {name: https, port: 8443, protocol: TCP, targetPort: 8443}
+  selector:
+    app.kubernetes.io/name: manifesto
+    control-plane: controller-manager
