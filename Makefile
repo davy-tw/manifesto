@@ -1,4 +1,4 @@
-# COMPONENT selects which binary the image contains: press, herald or darkroom.
+# COMPONENT selects which binary the image contains: press, herald, darkroom or desk.
 COMPONENT ?= press
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
@@ -148,6 +148,7 @@ build: manifests generate fmt vet ## Build press and herald binaries.
 	go build -o bin/press ./cmd/press
 	go build -o bin/herald ./cmd/herald
 	go build -o bin/darkroom ./cmd/darkroom
+	go build -o bin/desk ./cmd/desk
 
 .PHONY: run
 run: manifests generate fmt vet ## Run press (the operator) from your host.
@@ -163,7 +164,7 @@ run-herald: fmt vet ## Run herald (the visitor site) from your host.
 # Override BASE_IMAGE to build from another registry, e.g.
 # make docker-build IMG=<img> BASE_IMAGE=docker.io/library/golang:1.26
 .PHONY: docker-build
-docker-build: ## Build docker image for COMPONENT (press, herald or darkroom; default press).
+docker-build: ## Build docker image for COMPONENT (press, herald, darkroom or desk; default press).
 	$(CONTAINER_TOOL) build $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) --build-arg COMPONENT=$(COMPONENT) -t ${IMG} .
 
 .PHONY: docker-push
