@@ -42,8 +42,18 @@ const (
 	ReasonParentCycle      = "ParentCycle"
 	ReasonReconcileFailing = "ReconcileFailing"
 	ReasonProgrammed       = "Programmed"
+	ReasonArchiveNotFound  = "ArchiveNotFound"
+	ReasonArchiveNotReady  = "ArchiveNotReady"
+	ReasonBackendReady     = "BackendReady"
+	ReasonBackendError     = "BackendError"
+	ReasonUploadExpired    = "UploadExpired"
+	ReasonPrintNotReady    = "PrintNotReady"
 	ReasonRoutePending     = "RoutePending"
 )
+
+// PrintFinalizer lets press delete a Print's stored object, outside the
+// cluster, once no other Print in the namespace uses it.
+const PrintFinalizer = GroupName + "/stored-object"
 
 // FieldManagerPress is the Server-Side Apply field manager used by press.
 const FieldManagerPress = "manifesto-press"

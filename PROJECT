@@ -66,4 +66,27 @@ resources:
   kind: ClusterTypeset
   path: go.pkgs.davy.tw/manifesto/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: davy.tw
+  group: manifesto
+  kind: Print
+  path: go.pkgs.davy.tw/manifesto/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: davy.tw
+  group: manifesto
+  kind: Archive
+  path: go.pkgs.davy.tw/manifesto/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  domain: davy.tw
+  group: manifesto
+  kind: ClusterArchive
+  path: go.pkgs.davy.tw/manifesto/api/v1alpha1
+  version: v1alpha1
 version: "3"

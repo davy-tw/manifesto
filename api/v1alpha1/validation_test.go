@@ -223,3 +223,78 @@ func TestGazetteTypesetFields(t *testing.T) {
 	bad.Spec.PageSize = 1000
 	expectCreate(t, bad, "spec.pageSize")
 }
+
+const testSHA = "9f2c6b1a0e5d4c3b2a1908f7e6d5c4b3a29180f7e6d5c4b3a2918f7e6d5c4b3a"
+
+func validPrint(name string) *v1.Print {
+	return &v1.Print{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: v1.PrintSpec{
+			ArchiveRef:  v1.ArchiveRef{Name: "local"},
+			ContentType: "image/png",
+			Size:        482113,
+			SHA256:      testSHA,
+			Alt:         "封面圖",
+		},
+	}
+}
+
+func TestPrintValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*v1.Print)
+		wantErr string
+	}{
+		{"valid", func(*v1.Print) {}, ""},
+		{"uppercase hash", func(p *v1.Print) { p.Spec.SHA256 = strings.ToUpper(testSHA) }, "spec.sha256"},
+		{"short hash", func(p *v1.Print) { p.Spec.SHA256 = "abc" }, "spec.sha256"},
+		{"empty file", func(p *v1.Print) { p.Spec.Size = 0 }, "spec.size"},
+		{"too large", func(p *v1.Print) { p.Spec.Size = v1.MaxPrintBytes + 1 }, "spec.size"},
+		{"bad content type", func(p *v1.Print) { p.Spec.ContentType = "png" }, "spec.contentType"},
+		{"bad archive kind", func(p *v1.Print) { p.Spec.ArchiveRef.Kind = "Bucket" }, "spec.archiveRef.kind"},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := validPrint("print-" + string(rune('a'+i)))
+			tt.mutate(p)
+			expectCreate(t, p, tt.wantErr)
+		})
+	}
+
+	p := validPrint("defaults")
+	expectCreate(t, p, "")
+	if p.Spec.ArchiveRef.Kind != v1.KindClusterArchive {
+		t.Errorf("archiveRef.kind = %q, want default %q", p.Spec.ArchiveRef.Kind, v1.KindClusterArchive)
+	}
+	p.Spec.Alt = "changed"
+	if err := k8sClient.Update(context.Background(), p); err == nil || !strings.Contains(err.Error(), "spec is immutable") {
+		t.Errorf("updating spec: err = %v, want immutability error", err)
+	}
+}
+
+func TestArchiveValidation(t *testing.T) {
+	creds := v1.SecretReference{Name: "s3-creds"}
+	pvc := &v1.PVCArchiveSource{ClaimName: "manifesto-media-data", PublicURL: "https://media.example.io"}
+	s3 := &v1.S3ArchiveSource{Endpoint: "http://seaweedfs:8333", Bucket: "media", CredentialsSecretRef: creds}
+	tests := []struct {
+		name    string
+		spec    v1.ArchiveSpec
+		wantErr string
+	}{
+		{"pvc", v1.ArchiveSpec{PVC: pvc}, ""},
+		{"s3", v1.ArchiveSpec{S3: s3}, ""},
+		{"both", v1.ArchiveSpec{PVC: pvc, S3: s3}, "exactly one of s3 or pvc"},
+		{"neither", v1.ArchiveSpec{}, "exactly one of s3 or pvc"},
+		{"public URL without scheme", v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "c", PublicURL: "media.example.io"}}, "spec.pvc.publicURL"},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expectCreate(t, &v1.Archive{ObjectMeta: metav1.ObjectMeta{Name: "archive-" + string(rune('a'+i)), Namespace: "default"}, Spec: tt.spec}, tt.wantErr)
+		})
+	}
+	ca := &v1.ClusterArchive{ObjectMeta: metav1.ObjectMeta{Name: "shared-s3"}, Spec: v1.ArchiveSpec{S3: s3}}
+	expectCreate(t, ca, "")
+	if ca.Spec.S3.Region != "us-east-1" || ca.Spec.S3.PathStyle == nil || !*ca.Spec.S3.PathStyle {
+		t.Errorf("s3 defaults = region %q, pathStyle %v", ca.Spec.S3.Region, ca.Spec.S3.PathStyle)
+	}
+}

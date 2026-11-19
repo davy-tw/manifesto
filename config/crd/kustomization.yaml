@@ -9,6 +9,9 @@ resources:
 - bases/manifesto.davy.tw_stamps.yaml
 - bases/manifesto.davy.tw_typesets.yaml
 - bases/manifesto.davy.tw_clustertypesets.yaml
+- bases/manifesto.davy.tw_prints.yaml
+- bases/manifesto.davy.tw_archives.yaml
+- bases/manifesto.davy.tw_clusterarchives.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

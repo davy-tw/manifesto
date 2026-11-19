@@ -1,0 +1,17 @@
+apiVersion: manifesto.davy.tw/v1alpha1
+kind: Print
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: hello-cover
+spec:
+  archiveRef:
+    kind: ClusterArchive
+    name: local
+  contentType: image/svg+xml
+  # Upload docs/assets/hello-cover.svg to status.uploadURL once press sets it:
+  #   curl -T docs/assets/hello-cover.svg "$(kubectl get media hello-cover -o jsonpath='{.status.uploadURL}')"
+  size: 255
+  sha256: "c4275d038e3ba866777b1e00323afa2f0ac18b07a8f98b9087720a19f313a398"
+  alt: Hello K8s 的封面

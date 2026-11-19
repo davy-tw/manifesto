@@ -1,0 +1,220 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: prints.manifesto.davy.tw
+spec:
+  group: manifesto.davy.tw
+  names:
+    categories:
+    - manifesto
+    kind: Print
+    listKind: PrintList
+    plural: prints
+    shortNames:
+    - media
+    singular: print
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.contentType
+      name: Type
+      type: string
+    - jsonPath: .spec.size
+      name: Size
+      type: integer
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.url
+      name: URL
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Print is a media file. It records the file's metadata; the file itself is
+          uploaded to its Archive and referenced from content as print:<name>.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec describes the file
+            properties:
+              alt:
+                description: alt is the text alternative for images.
+                maxLength: 1024
+                type: string
+              archiveRef:
+                description: archiveRef is where the file is stored.
+                properties:
+                  kind:
+                    default: ClusterArchive
+                    description: kind is Archive (same namespace) or ClusterArchive.
+                    enum:
+                    - Archive
+                    - ClusterArchive
+                    type: string
+                  name:
+                    description: name of the storage.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              contentType:
+                description: contentType is the file's media type, e.g. image/png.
+                maxLength: 127
+                pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$
+                type: string
+              sha256:
+                description: |-
+                  sha256 is the hex SHA-256 of the file; the upload must match it. The
+                  file is stored and served under this hash, so its URL never changes
+                  and identical files in a namespace share one object.
+                pattern: ^[0-9a-f]{64}$
+                type: string
+              size:
+                description: size is the file's length in bytes; the upload must match
+                  it.
+                format: int64
+                maximum: 104857600
+                minimum: 1
+                type: integer
+            required:
+            - archiveRef
+            - contentType
+            - sha256
+            - size
+            type: object
+            x-kubernetes-validations:
+            - message: spec is immutable; create a new Print for a different file
+              rule: self == oldSelf
+          status:
+            description: status is the state of the Print as observed by press
+            properties:
+              conditions:
+                description: |-
+                  conditions describe the Print's current state. "Ready" is False when
+                  its Archive is missing or not usable.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              objectKey:
+                description: 'objectKey is where the file is stored: <namespace UID>/sha256/<hash>.<ext>.'
+                type: string
+              observedGeneration:
+                description: observedGeneration is the metadata.generation that the
+                  status reflects.
+                format: int64
+                type: integer
+              phase:
+                description: phase is Pending, Ready or Failed.
+                enum:
+                - Pending
+                - Ready
+                - Failed
+                type: string
+              uploadExpiresAt:
+                description: |-
+                  uploadExpiresAt is when uploadURL stops working; a Print still Pending
+                  then becomes Failed.
+                format: date-time
+                type: string
+              uploadURL:
+                description: |-
+                  uploadURL is a short-lived signed URL to PUT the file to. It is only
+                  set while the Print is Pending.
+                type: string
+              url:
+                description: url is the public address of the file.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: metadata.name is referenced as print:<name> and must be a DNS label
+          rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$') && size(self.metadata.name)
+            <= 63
+    served: true
+    storage: true
+    subresources:
+      status: {}
