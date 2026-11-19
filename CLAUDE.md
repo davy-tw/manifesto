@@ -4,7 +4,7 @@ Manifesto 是完全 Kubernetes 原生的部落格引擎：內容都是 CRD，邏
 完整設計見 `docs/design.md`；這份文件只放每次工作都需要的規則。
 
 - Go module：`go.pkgs.davy.tw/manifesto`
-- API group：暫用 `manifesto.davy.tw`，確定網域後全域替換
+- API group：`manifesto.davy.tw`
 
 ## 核心原則（不可違反）
 
@@ -86,4 +86,6 @@ M1（MVP）、M2（內容與網站）、M3（媒體，PVC 與 S3 後端）已完
 
 S3 慣例：只用標準 S3 API（aws-sdk-go-v2，關閉非必要的 checksum header）；press 下載核對 sha256 後才把 Print 設為 Ready；憑證 Secret 用 API reader 直接讀取。測試：單元測試用 gofakes3，E2E 用開啟認證的 SeaweedFS（`test/e2e/s3/`）。
 
-下一步：M4（desk）。範圍外：Edition、mfctl。
+下一步：M4（desk），包含 `proofreader`、`editor`、`publisher` 三個 ClusterRole（desk 用使用者本人的 token，權限全靠它們；也要涵蓋 Print 上傳流程）。範圍外：Edition、mfctl。
+
+測試計畫：整套功能完成後才在真實的 k3s 環境部署測試；在那之前以 CI 上的 Kind 與 k3d E2E 為準。
