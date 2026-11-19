@@ -9,6 +9,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -64,7 +65,11 @@ func (r *DispatchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, err
 		}
 	}
-	rendered, err := r.renderedCondition(ctx, &d, gazette, scribe)
+	tax, err := taxonomyFor(ctx, r.Client, &d, scribe)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	rendered, err := r.renderedCondition(ctx, &d, gazette, tax)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -79,7 +84,7 @@ func (r *DispatchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if gazette != nil {
 		status.URL = render.DispatchURL(gazette.Spec.Domain, d.Name)
 	}
-	meta.SetStatusCondition(&status.Conditions, readyCondition(&d, gazette, scribe))
+	meta.SetStatusCondition(&status.Conditions, readyCondition(&d, gazette, scribe, tax.Prints))
 	meta.SetStatusCondition(&status.Conditions, rendered)
 
 	if !equality.Semantic.DeepEqual(status, d.Status) {
@@ -117,9 +122,15 @@ func getOptional[T any, PT interface {
 	}
 }
 
-// readyCondition reports whether the Gazette and Scribe the Dispatch refers
-// to exist.
-func readyCondition(d *v1.Dispatch, gazette *v1.Gazette, scribe *v1.Scribe) metav1.Condition {
+// readyCondition reports whether the Gazette, Scribe and Prints the Dispatch
+// refers to exist (and the Prints are Ready).
+func readyCondition(d *v1.Dispatch, gazette *v1.Gazette, scribe *v1.Scribe, prints map[string]*v1.Print) metav1.Condition {
+	var notReady []string
+	for _, name := range render.PrintRefs(d) {
+		if p := prints[name]; p == nil || p.Status.Phase != v1.PrintReady {
+			notReady = append(notReady, name)
+		}
+	}
 	c := metav1.Condition{
 		Type:               v1.ConditionReady,
 		Status:             metav1.ConditionTrue,
@@ -134,13 +145,16 @@ func readyCondition(d *v1.Dispatch, gazette *v1.Gazette, scribe *v1.Scribe) meta
 	case d.Spec.ScribeRef != "" && scribe == nil:
 		c.Status, c.Reason = metav1.ConditionFalse, v1.ReasonScribeNotFound
 		c.Message = fmt.Sprintf("Scribe %q not found in namespace %q", d.Spec.ScribeRef, d.Namespace)
+	case len(notReady) > 0:
+		c.Status, c.Reason = metav1.ConditionFalse, v1.ReasonPrintNotReady
+		c.Message = fmt.Sprintf("Prints not found or not Ready: %s", strings.Join(notReady, ", "))
 	}
 	return c
 }
 
 // renderedCondition trial-renders the Dispatch with its Gazette's theme and
 // discards the output, so authors see errors before visitors do.
-func (r *DispatchReconciler) renderedCondition(ctx context.Context, d *v1.Dispatch, gazette *v1.Gazette, scribe *v1.Scribe) (metav1.Condition, error) {
+func (r *DispatchReconciler) renderedCondition(ctx context.Context, d *v1.Dispatch, gazette *v1.Gazette, tax render.Taxonomy) (metav1.Condition, error) {
 	c := metav1.Condition{
 		Type:               v1.ConditionRendered,
 		Status:             metav1.ConditionTrue,
@@ -156,10 +170,6 @@ func (r *DispatchReconciler) renderedCondition(ctx context.Context, d *v1.Dispat
 		c.Status, c.Reason = metav1.ConditionFalse, theme.reason
 		c.Message = render.TruncateMessage(theme.err.Error())
 		return c, nil
-	}
-	tax, err := taxonomyFor(ctx, r.Client, d, scribe)
-	if err != nil {
-		return c, err
 	}
 	if _, err := render.NewSite(theme.theme, gazette, theme.params, tax).DispatchPage(d); err != nil {
 		c.Status = metav1.ConditionFalse
@@ -178,6 +188,8 @@ func (r *DispatchReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{}))).
 		Watches(&v1.Gazette{}, handler.EnqueueRequestsFromMapFunc(r.dispatchesOfGazette), generation).
 		Watches(&v1.Scribe{}, handler.EnqueueRequestsFromMapFunc(r.dispatchesOfScribe), generation).
+		// A Print becoming Ready changes its status only, so no generation filter.
+		Watches(&v1.Print{}, handler.EnqueueRequestsFromMapFunc(r.dispatchesOfPrint)).
 		Watches(&v1.Typeset{}, handler.EnqueueRequestsFromMapFunc(r.dispatchesOfTypeset), generation).
 		Watches(&v1.ClusterTypeset{}, handler.EnqueueRequestsFromMapFunc(r.dispatchesOfTypeset), generation).
 		Named("dispatch").
@@ -201,6 +213,10 @@ func (r *DispatchReconciler) listDispatches(ctx context.Context, namespace, fiel
 // their URL and conditions follow when it is created, changed or deleted.
 func (r *DispatchReconciler) dispatchesOfGazette(ctx context.Context, o client.Object) []reconcile.Request {
 	return r.listDispatches(ctx, o.GetNamespace(), gazetteRefIndex, o.GetName())
+}
+
+func (r *DispatchReconciler) dispatchesOfPrint(ctx context.Context, o client.Object) []reconcile.Request {
+	return r.listDispatches(ctx, o.GetNamespace(), printRefIndex, o.GetName())
 }
 
 func (r *DispatchReconciler) dispatchesOfScribe(ctx context.Context, o client.Object) []reconcile.Request {

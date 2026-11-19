@@ -78,6 +78,7 @@ type Inputs struct {
 	Stamps          []v1.Stamp
 	Typesets        []v1.Typeset
 	ClusterTypesets []v1.ClusterTypeset
+	Prints          []v1.Print
 }
 
 // Builder renders Snapshots.
@@ -191,8 +192,8 @@ type namespaceTaxonomy struct {
 	key string
 }
 
-// buildTaxonomies groups Sections, Stamps and Scribes by namespace, with a
-// key that changes whenever any of them does.
+// buildTaxonomies groups Sections, Stamps, Scribes and Prints by namespace,
+// with a key that changes whenever any of them does.
 func buildTaxonomies(in Inputs) map[string]namespaceTaxonomy {
 	out := map[string]namespaceTaxonomy{}
 	parts := map[string][]string{}
@@ -200,7 +201,8 @@ func buildTaxonomies(in Inputs) map[string]namespaceTaxonomy {
 		t, ok := out[ns]
 		if !ok {
 			t.Taxonomy = render.Taxonomy{
-				Sections: map[string]*v1.Section{}, Stamps: map[string]*v1.Stamp{}, Scribes: map[string]*v1.Scribe{},
+				Sections: map[string]*v1.Section{}, Stamps: map[string]*v1.Stamp{},
+				Scribes: map[string]*v1.Scribe{}, Prints: map[string]*v1.Print{},
 			}
 		}
 		return t
@@ -225,6 +227,13 @@ func buildTaxonomies(in Inputs) map[string]namespaceTaxonomy {
 		t.Scribes[s.Name] = s
 		out[s.Namespace] = t
 		parts[s.Namespace] = append(parts[s.Namespace], "scribe/"+s.Name+"/"+s.ResourceVersion)
+	}
+	for i := range in.Prints {
+		p := &in.Prints[i]
+		t := get(p.Namespace)
+		t.Prints[p.Name] = p
+		out[p.Namespace] = t
+		parts[p.Namespace] = append(parts[p.Namespace], "print/"+p.Name+"/"+p.ResourceVersion)
 	}
 	for ns, p := range parts {
 		slices.Sort(p)

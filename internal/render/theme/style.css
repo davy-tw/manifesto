@@ -12,3 +12,5 @@ img { max-width: 100%; }
 .stamps { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .stamps a { font-size: 0.85rem; padding: 0.1rem 0.5rem; border: 1px solid #d1d5db; border-radius: 999px; text-decoration: none; color: inherit; }
 .pagination { display: flex; gap: 1rem; justify-content: center; color: #6b7280; }
+.logo { height: 1.6em; vertical-align: middle; margin-right: 0.4em; }
+.cover { width: 100%; border-radius: 0.5rem; margin-top: 1rem; }

@@ -172,4 +172,34 @@ var _ = Describe("Media", func() {
 		Eventually(func() bool { return apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(p), p)) },
 			timeout, interval).Should(BeTrue())
 	})
+
+	It("keeps a Dispatch that uses a Print not Ready until the file is stored", func() {
+		ns := newNamespace()
+		const body = "cover bytes"
+		p := newPrint(ns, "cover", local, body)
+		Expect(k8sClient.Create(ctx, p)).To(Succeed())
+		Expect(k8sClient.Create(ctx, newGazette(ns, "notes", ns+".example.io"))).To(Succeed())
+		d := newDispatch(ns, "with-cover", v1.StateDraft)
+		d.Spec.Cover = "print:cover"
+		d.Spec.Content.Body = "![inline](print:cover) and ![missing](print:nowhere)"
+		Expect(k8sClient.Create(ctx, d)).To(Succeed())
+
+		Eventually(fetch(d), timeout, interval).Should(
+			WithTransform(dispatchCondition(v1.ConditionReady), Equal("False/"+v1.ReasonPrintNotReady)))
+		Expect(condition(d.Status.Conditions, v1.ConditionReady).Message).To(ContainSubstring("cover, nowhere"))
+
+		By("uploading the cover")
+		Eventually(fetch(p), timeout, interval).Should(WithTransform(func(p *v1.Print) string { return p.Status.UploadURL }, Not(BeEmpty())))
+		code, _ := httpDo(http.MethodPut, p.Status.UploadURL, body)
+		Expect(code).To(Equal(http.StatusCreated))
+		Eventually(func() string {
+			fetch(d)()
+			return condition(d.Status.Conditions, v1.ConditionReady).Message
+		}, timeout, interval).Should(Equal("Prints not found or not Ready: nowhere"))
+
+		By("dropping the missing reference")
+		update(d, func(d *v1.Dispatch) { d.Spec.Content.Body = "![inline](print:cover)" })
+		Eventually(fetch(d), timeout, interval).Should(
+			WithTransform(dispatchCondition(v1.ConditionReady), Equal("True/"+v1.ReasonResolved)))
+	})
 })

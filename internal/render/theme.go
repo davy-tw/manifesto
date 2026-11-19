@@ -9,7 +9,6 @@ package render
 import (
 	"bytes"
 	"embed"
-	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -31,6 +30,8 @@ var pageTemplates = []string{DispatchTemplate, IndexTemplate}
 
 // Theme is a parsed set of page templates and their assets.
 type Theme struct {
+	// pages are never executed: html/template cannot clone an executed
+	// template, and every render clones a page to bind printurl.
 	pages map[string]*template.Template
 }
 
@@ -137,18 +138,29 @@ func funcMap(assets map[string]string) template.FuncMap {
 		// url returns the path of a Dispatch by name, e.g. {{ url .Name }}.
 		"url": DispatchPath,
 		// printurl resolves a Print by name. Prints arrive in M3.
-		"printurl": func(string) (string, error) {
-			return "", errors.New("printurl: Print resources are not supported yet")
-		},
+		// printurl resolves a Print by name, e.g. {{ printurl "logo" }}. It
+		// is rebound for every render; an unknown or not Ready Print gives "".
+		"printurl": func(string) string { return "" },
 	}
 }
 
 // Render executes one page template (DispatchTemplate or IndexTemplate).
-func (t *Theme) Render(page string, data *PageData) ([]byte, error) {
-	tpl, ok := t.pages[page]
+// resolve answers printurl and may be nil.
+func (t *Theme) Render(page string, data *PageData, resolve PrintResolver) ([]byte, error) {
+	pristine, ok := t.pages[page]
 	if !ok {
 		return nil, templateError(fmt.Errorf("unknown page %q", page))
 	}
+	tpl, err := pristine.Clone()
+	if err != nil {
+		return nil, templateError(err)
+	}
+	tpl.Funcs(template.FuncMap{"printurl": func(name string) string {
+		if resolve == nil {
+			return ""
+		}
+		return resolve(name)
+	}})
 	var buf bytes.Buffer
 	if err := tpl.ExecuteTemplate(&buf, LayoutTemplate, data); err != nil {
 		return nil, templateError(err)

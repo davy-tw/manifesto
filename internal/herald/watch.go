@@ -35,6 +35,7 @@ func Watch(ctx context.Context, c cache.Cache, b *Builder, srv *Server) error {
 	}
 	for _, obj := range []client.Object{
 		&v1.Gazette{}, &v1.Dispatch{}, &v1.Scribe{}, &v1.Section{}, &v1.Stamp{}, &v1.Typeset{}, &v1.ClusterTypeset{},
+		&v1.Print{},
 	} {
 		inf, err := c.GetInformer(ctx, obj)
 		if err != nil {
@@ -73,8 +74,9 @@ func list(ctx context.Context, c client.Reader) (Inputs, error) {
 		stamps     v1.StampList
 		typesets   v1.TypesetList
 		cluster    v1.ClusterTypesetList
+		prints     v1.PrintList
 	)
-	for _, l := range []client.ObjectList{&gazettes, &dispatches, &scribes, &sections, &stamps, &typesets, &cluster} {
+	for _, l := range []client.ObjectList{&gazettes, &dispatches, &scribes, &sections, &stamps, &typesets, &cluster, &prints} {
 		if err := c.List(ctx, l); err != nil {
 			return Inputs{}, err
 		}
@@ -82,5 +84,6 @@ func list(ctx context.Context, c client.Reader) (Inputs, error) {
 	return Inputs{
 		Gazettes: gazettes.Items, Dispatches: dispatches.Items, Scribes: scribes.Items,
 		Sections: sections.Items, Stamps: stamps.Items, Typesets: typesets.Items, ClusterTypesets: cluster.Items,
+		Prints: prints.Items,
 	}, nil
 }

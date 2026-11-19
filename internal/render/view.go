@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"maps"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ type GazetteView struct {
 	Domain   string
 	Language string
 	URL      string
+	// Logo is the URL of the logo Print, or "".
+	Logo string
 }
 
 // TermView is a Section or Stamp as seen by templates. DisplayName falls
@@ -45,6 +48,8 @@ type ScribeView struct {
 	DisplayName string
 	Bio         string
 	Path        string
+	// Avatar is the URL of the avatar Print, or "".
+	Avatar string
 }
 
 // DispatchView is a Dispatch as seen by theme templates (.Dispatch and the
@@ -56,6 +61,9 @@ type DispatchView struct {
 	URL         string
 	Path        string
 	PublishedAt *time.Time
+	// Cover is the URL of the cover Print, or "", and CoverAlt its alt text.
+	Cover    string
+	CoverAlt string
 	// Section is nil when the Dispatch has no section label.
 	Section *TermView
 	Stamps  []TermView
@@ -98,11 +106,12 @@ type PageData struct {
 }
 
 // Taxonomy holds the optional Sections, Stamps and Scribes of a namespace,
-// keyed by name.
+// and its Prints, keyed by name.
 type Taxonomy struct {
 	Sections map[string]*v1.Section
 	Stamps   map[string]*v1.Stamp
 	Scribes  map[string]*v1.Scribe
+	Prints   map[string]*v1.Print
 }
 
 // Site is everything needed to render the pages of one Gazette.
@@ -149,9 +158,32 @@ func PagePath(base string, n int) string {
 	return strings.TrimSuffix(base, "/") + "/page/" + strconv.Itoa(n)
 }
 
+// PrintURL resolves a Print of the Site's namespace by name. Prints that do
+// not exist or are not Ready resolve to "".
+func (s *Site) PrintURL(name string) string {
+	p := s.Taxonomy.Prints[name]
+	if p == nil || p.Status.Phase != v1.PrintReady {
+		return ""
+	}
+	return p.Status.URL
+}
+
+// printRef resolves a "print:<name>" field.
+func (s *Site) printRef(ref v1.PrintRef) (link, alt string) {
+	name, ok := strings.CutPrefix(string(ref), PrintScheme)
+	if !ok {
+		return "", ""
+	}
+	if p := s.Taxonomy.Prints[name]; p != nil {
+		alt = p.Spec.Alt
+	}
+	return s.PrintURL(name), alt
+}
+
 // GazetteView returns the template view of the Site's Gazette.
 func (s *Site) GazetteView() GazetteView {
 	g := s.Gazette
+	logo, _ := s.printRef(g.Spec.Logo)
 	return GazetteView{
 		Name:     g.Name,
 		Title:    g.Spec.Title,
@@ -159,6 +191,7 @@ func (s *Site) GazetteView() GazetteView {
 		Domain:   g.Spec.Domain,
 		Language: g.Spec.Language,
 		URL:      GazetteURL(g.Spec.Domain),
+		Logo:     logo,
 	}
 }
 
@@ -192,7 +225,8 @@ func (s *Site) ScribeView(name string) *ScribeView {
 	if sc == nil {
 		return nil
 	}
-	return &ScribeView{Name: name, DisplayName: sc.Spec.DisplayName, Bio: sc.Spec.Bio, Path: ScribePath(name)}
+	avatar, _ := s.printRef(sc.Spec.Avatar)
+	return &ScribeView{Name: name, DisplayName: sc.Spec.DisplayName, Bio: sc.Spec.Bio, Path: ScribePath(name), Avatar: avatar}
 }
 
 // DispatchView builds the listing view of d, without its body.
@@ -208,6 +242,7 @@ func (s *Site) DispatchView(d *v1.Dispatch) DispatchView {
 		t := d.Status.PublishedAt.Time
 		v.PublishedAt = &t
 	}
+	v.Cover, v.CoverAlt = s.printRef(d.Spec.Cover)
 	if name := SectionOf(d); name != "" {
 		sec := s.SectionView(name)
 		v.Section = &sec
@@ -224,14 +259,14 @@ func (s *Site) DispatchView(d *v1.Dispatch) DispatchView {
 // DispatchPage renders the page of d.
 func (s *Site) DispatchPage(d *v1.Dispatch) ([]byte, error) {
 	dv := s.DispatchView(d)
-	html, err := Markdown(d.Spec.Content.Body)
+	html, err := Markdown(d.Spec.Content.Body, s.PrintURL)
 	if err != nil {
 		return nil, err
 	}
 	dv.HTML = html
 	return s.Theme.Render(DispatchTemplate, &PageData{
 		Gazette: s.GazetteView(), Dispatch: &dv, Params: s.Params,
-	})
+	}, s.PrintURL)
 }
 
 // ListPage renders a listing of ds, in the given order. filter is nil on
@@ -243,7 +278,7 @@ func (s *Site) ListPage(ds []*v1.Dispatch, filter *FilterView, pagination *Pagin
 	}
 	return s.Theme.Render(IndexTemplate, &PageData{
 		Gazette: s.GazetteView(), Dispatches: views, Filter: filter, Pagination: pagination, Params: s.Params,
-	})
+	}, s.PrintURL)
 }
 
 // SectionOf returns the Section label of d, or "".
@@ -272,3 +307,23 @@ func ParseTypeset(spec *v1.TypesetSpec) (*Theme, error) {
 	}
 	return ParseTheme(spec.Source.Inline.Templates, spec.Source.Inline.Assets)
 }
+
+// PrintRefs returns the names of the Prints d refers to: its cover and the
+// print:<name> references in its body, sorted and without duplicates.
+func PrintRefs(d *v1.Dispatch) []string {
+	seen := map[string]bool{}
+	if name, ok := strings.CutPrefix(string(d.Spec.Cover), PrintScheme); ok && name != "" {
+		seen[name] = true
+	}
+	for _, m := range printRefRE.FindAllStringSubmatch(d.Spec.Content.Body, -1) {
+		seen[m[1]] = true
+	}
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return names
+}
+
+var printRefRE = regexp.MustCompile(`\(\s*<?print:([a-z0-9]([-a-z0-9]*[a-z0-9])?)`)

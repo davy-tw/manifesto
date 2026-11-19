@@ -18,6 +18,7 @@ import (
 
 	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 	"go.pkgs.davy.tw/manifesto/internal/domain"
+	"go.pkgs.davy.tw/manifesto/internal/render"
 )
 
 // Field indexes shared by press's controllers.
@@ -30,6 +31,8 @@ const (
 	domainIndex = "spec.domain"
 	// typesetIndex indexes Gazettes by the theme they use, see typesetKey.
 	typesetIndex = "spec.typesetRef"
+	// printRefIndex indexes Dispatches by the Prints they refer to.
+	printRefIndex = "printRefs"
 	// printObjectIndex indexes Prints by status.objectKey.
 	printObjectIndex = "status.objectKey"
 	// printArchiveIndex indexes Prints by their Archive, see archiveKey.
@@ -58,6 +61,11 @@ func Setup(mgr ctrl.Manager, opts Options) error {
 			return []string{ref}
 		}
 		return nil
+	}); err != nil {
+		return err
+	}
+	if err := idx.IndexField(ctx, &v1.Dispatch{}, printRefIndex, func(o client.Object) []string {
+		return render.PrintRefs(o.(*v1.Dispatch))
 	}); err != nil {
 		return err
 	}
