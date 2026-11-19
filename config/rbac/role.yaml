@@ -5,6 +5,14 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - cert-manager.io
   resources:
   - certificates
@@ -31,6 +39,8 @@ rules:
 - apiGroups:
   - manifesto.davy.tw
   resources:
+  - archives
+  - clusterarchives
   - clustertypesets
   - dispatches
   - gazettes
@@ -45,11 +55,37 @@ rules:
 - apiGroups:
   - manifesto.davy.tw
   resources:
+  - archives/status
+  - clusterarchives/status
   - clustertypesets/status
   - dispatches/status
   - gazettes/status
+  - prints/status
   - sections/status
   - typesets/status
   verbs:
   - get
   - patch
+- apiGroups:
+  - manifesto.davy.tw
+  resources:
+  - prints
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: manager-role
+  namespace: manifesto-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - get

@@ -30,11 +30,22 @@ const (
 	domainIndex = "spec.domain"
 	// typesetIndex indexes Gazettes by the theme they use, see typesetKey.
 	typesetIndex = "spec.typesetRef"
+	// printObjectIndex indexes Prints by status.objectKey.
+	printObjectIndex = "status.objectKey"
+	// printArchiveIndex indexes Prints by their Archive, see archiveKey.
+	printArchiveIndex = "spec.archiveRef"
 )
 
-// Setup registers press's field indexes and controllers with mgr. Routing
-// is optional; its zero value leaves routing to the cluster operator.
-func Setup(mgr ctrl.Manager, clk clock.PassiveClock, routing Routing) error {
+// Options configure press's controllers. The zero value works: real clock,
+// no routing, no media backends.
+type Options struct {
+	Clock   clock.PassiveClock
+	Routing Routing
+	Media   Media
+}
+
+// Setup registers press's field indexes and controllers with mgr.
+func Setup(mgr ctrl.Manager, opts Options) error {
 	ctx := context.Background()
 	idx := mgr.GetFieldIndexer()
 	if err := idx.IndexField(ctx, &v1.Dispatch{}, gazetteRefIndex, func(o client.Object) []string {
@@ -64,10 +75,28 @@ func Setup(mgr ctrl.Manager, clk clock.PassiveClock, routing Routing) error {
 		return err
 	}
 
+	if err := idx.IndexField(ctx, &v1.Print{}, printObjectIndex, func(o client.Object) []string {
+		if k := o.(*v1.Print).Status.ObjectKey; k != "" {
+			return []string{k}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := idx.IndexField(ctx, &v1.Print{}, printArchiveIndex, func(o client.Object) []string {
+		ref := o.(*v1.Print).Spec.ArchiveRef
+		return []string{archiveKey(ref.Kind, o.GetNamespace(), ref.Name)}
+	}); err != nil {
+		return err
+	}
+
 	c, scheme := mgr.GetClient(), mgr.GetScheme()
 	for _, r := range []interface{ SetupWithManager(ctrl.Manager) error }{
-		&GazetteReconciler{Client: c, Scheme: scheme, Routing: routing},
-		&DispatchReconciler{Client: c, Scheme: scheme, Clock: clk},
+		&GazetteReconciler{Client: c, Scheme: scheme, Routing: opts.Routing},
+		&DispatchReconciler{Client: c, Scheme: scheme, Clock: opts.Clock},
+		&PrintReconciler{Client: c, Scheme: scheme, Media: opts.Media, Clock: opts.Clock},
+		&ArchiveReconciler{Client: c, Scheme: scheme, Media: opts.Media},
+		&ArchiveReconciler{Client: c, Scheme: scheme, Media: opts.Media, Cluster: true},
 		&SectionReconciler{Client: c, Scheme: scheme},
 		&TypesetReconciler{Client: c, Scheme: scheme},
 		&TypesetReconciler{Client: c, Scheme: scheme, Cluster: true},
