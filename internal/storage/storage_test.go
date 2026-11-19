@@ -51,10 +51,10 @@ func TestPVCAgainstDarkroom(t *testing.T) {
 	sum := sha256.Sum256([]byte(body))
 	objectKey := ObjectKey("3f1c9a2e-0000-4000-8000-000000000001", hex.EncodeToString(sum[:]), "text/plain")
 
-	if ok, err := d.Exists(ctx, objectKey); err != nil || ok {
+	if ok, err := d.Stored(ctx, objectKey, int64(len(body))); err != nil || ok {
 		t.Fatalf("Exists before upload = %v, %v", ok, err)
 	}
-	u, expires, err := d.SignUpload(objectKey, int64(len(body)), 5*time.Minute)
+	u, expires, err := d.SignUpload(ctx, objectKey, "text/plain", int64(len(body)), 5*time.Minute)
 	if err != nil || time.Until(expires) < 4*time.Minute {
 		t.Fatalf("SignUpload = %v, %v", expires, err)
 	}
@@ -63,7 +63,7 @@ func TestPVCAgainstDarkroom(t *testing.T) {
 	if err != nil || resp.StatusCode != http.StatusCreated {
 		t.Fatalf("upload = %v, %v", resp, err)
 	}
-	if ok, err := d.Exists(ctx, objectKey); err != nil || !ok {
+	if ok, err := d.Stored(ctx, objectKey, int64(len(body))); err != nil || !ok {
 		t.Fatalf("Exists after upload = %v, %v", ok, err)
 	}
 	if got := d.PublicURL(objectKey); got != public.URL+"/"+objectKey {
@@ -72,7 +72,7 @@ func TestPVCAgainstDarkroom(t *testing.T) {
 	if err := d.Delete(ctx, objectKey); err != nil {
 		t.Fatal(err)
 	}
-	if ok, _ := d.Exists(ctx, objectKey); ok {
+	if ok, _ := d.Stored(ctx, objectKey, int64(len(body))); ok {
 		t.Error("object still exists after Delete")
 	}
 	if err := d.Delete(ctx, objectKey); err != nil {
@@ -80,7 +80,7 @@ func TestPVCAgainstDarkroom(t *testing.T) {
 	}
 
 	bad := &PVC{InternalURL: internal.URL, Key: []byte("wrong")}
-	if _, err := bad.Exists(ctx, objectKey); err == nil {
+	if _, err := bad.Stored(ctx, objectKey, int64(len(body))); err == nil {
 		t.Error("a wrong key must be rejected")
 	}
 	if err := (&PVC{InternalURL: "http://127.0.0.1:1"}).Check(ctx); err == nil {

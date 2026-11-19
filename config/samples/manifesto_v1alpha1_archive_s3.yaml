@@ -1,0 +1,25 @@
+# An Archive backed by an S3-compatible bucket (e.g. SeaweedFS). Not part of
+# the sample kustomization: create the bucket and the Secret first.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-creds
+stringData:
+  accessKeyID: CHANGE-ME
+  secretAccessKey: CHANGE-ME
+---
+apiVersion: manifesto.davy.tw/v1alpha1
+kind: Archive
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: bucket
+spec:
+  s3:
+    endpoint: http://seaweedfs-s3.storage.svc:8333
+    bucket: manifesto-media
+    credentialsSecretRef:
+      name: s3-creds
+    # Where visitors read objects, e.g. a CDN or a public route to the bucket.
+    publicURL: https://media.example.io/manifesto-media

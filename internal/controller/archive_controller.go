@@ -56,7 +56,7 @@ func (r *ArchiveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Message: "Backend reachable", ObservedGeneration: obj.GetGeneration(),
 	}
 	var result ctrl.Result
-	driver, err := r.Media.driverFor(spec)
+	driver, err := r.Media.driverFor(ctx, spec, req.Namespace)
 	if err == nil {
 		err = driver.Check(ctx)
 		result.RequeueAfter = time.Minute

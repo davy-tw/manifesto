@@ -40,6 +40,7 @@ const pendingPoll = 2 * time.Second
 const (
 	reasonStored         = "Stored"
 	reasonAwaitingUpload = "AwaitingUpload"
+	reasonUploadRejected = "UploadRejected"
 )
 
 // PrintReconciler tracks each Print's file: it hands out a signed upload
@@ -71,7 +72,11 @@ func (r *PrintReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var driver storage.Driver
 	spec, err := getArchive(ctx, r.Client, p.Namespace, p.Spec.ArchiveRef)
 	if err == nil {
-		driver, err = r.Media.driverFor(spec)
+		archiveNS := p.Namespace
+		if p.Spec.ArchiveRef.Kind != v1.KindArchive {
+			archiveNS = ""
+		}
+		driver, err = r.Media.driverFor(ctx, spec, archiveNS)
 	}
 
 	if p.DeletionTimestamp != nil {
@@ -108,7 +113,7 @@ func (r *PrintReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		ready.Status, ready.Reason = metav1.ConditionFalse, v1.ReasonUploadExpired
 		ready.Message = "The file was not uploaded in time; delete this Print and create it again"
 	default:
-		result, err = r.track(ctx, &status, &ready, driver, objectKey, p.Spec.Size)
+		result, err = r.track(ctx, &status, &ready, driver, objectKey, p.Spec.ContentType, p.Spec.Size)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -125,10 +130,15 @@ func (r *PrintReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 // track checks whether the file is stored and otherwise keeps an upload
 // URL available until it expires.
 func (r *PrintReconciler) track(ctx context.Context, status *v1.PrintStatus, ready *metav1.Condition,
-	driver storage.Driver, objectKey string, size int64) (ctrl.Result, error) {
-	stored, err := driver.Exists(ctx, objectKey)
+	driver storage.Driver, objectKey, contentType string, size int64) (ctrl.Result, error) {
+	stored, err := driver.Stored(ctx, objectKey, size)
 	if err != nil {
 		ready.Status, ready.Reason, ready.Message = metav1.ConditionFalse, v1.ReasonBackendError, err.Error()
+		if storage.IsRejected(err) {
+			// The wrong file was uploaded and removed; the URL still works.
+			ready.Reason = reasonUploadRejected
+			return ctrl.Result{RequeueAfter: pendingPoll}, nil
+		}
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	if stored {
@@ -148,7 +158,7 @@ func (r *PrintReconciler) track(ctx context.Context, status *v1.PrintStatus, rea
 		ready.Message = "The file was not uploaded in time; delete this Print and create it again"
 		return ctrl.Result{}, nil
 	case status.UploadURL == "":
-		u, expires, err := driver.SignUpload(objectKey, size, r.Media.uploadTTL())
+		u, expires, err := driver.SignUpload(ctx, objectKey, contentType, size, r.Media.uploadTTL())
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -156,7 +166,12 @@ func (r *PrintReconciler) track(ctx context.Context, status *v1.PrintStatus, rea
 		status.UploadURL, status.UploadExpiresAt = u, &at
 	}
 	ready.Status, ready.Reason = metav1.ConditionFalse, reasonAwaitingUpload
-	ready.Message = fmt.Sprintf("PUT the file to status.uploadURL before %s", status.UploadExpiresAt.UTC().Format(time.RFC3339))
+	ready.Message = fmt.Sprintf("PUT the file to status.uploadURL with Content-Type %s before %s",
+		contentType, status.UploadExpiresAt.UTC().Format(time.RFC3339))
+	if prev := meta.FindStatusCondition(status.Conditions, v1.ConditionReady); prev != nil && prev.Reason == reasonUploadRejected {
+		// Keep telling the uploader why the last attempt was removed.
+		ready.Reason, ready.Message = prev.Reason, prev.Message
+	}
 	wait := min(pendingPoll, status.UploadExpiresAt.Sub(now))
 	return ctrl.Result{RequeueAfter: max(wait, time.Second)}, nil
 }

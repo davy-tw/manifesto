@@ -99,6 +99,9 @@ func Setup(mgr ctrl.Manager, opts Options) error {
 	}
 
 	c, scheme := mgr.GetClient(), mgr.GetScheme()
+	if opts.Media.Secrets == nil {
+		opts.Media.Secrets = mgr.GetAPIReader()
+	}
 	for _, r := range []interface{ SetupWithManager(ctrl.Manager) error }{
 		&GazetteReconciler{Client: c, Scheme: scheme, Routing: opts.Routing},
 		&DispatchReconciler{Client: c, Scheme: scheme, Clock: opts.Clock},

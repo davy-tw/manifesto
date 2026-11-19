@@ -30,6 +30,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/johannesboyne/gofakes3"
+	"github.com/johannesboyne/gofakes3/backend/s3mem"
+
 	"go.pkgs.davy.tw/manifesto/internal/darkroom"
 
 	manifestov1alpha1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
@@ -49,9 +52,11 @@ var testRouting = Routing{
 
 var (
 	testSigningKey = []byte("test-signing-key")
-	testUploadTTL  = 4 * time.Second
+	testUploadTTL  = 8 * time.Second
 	darkroomStore  *darkroom.Store
 	darkroomPublic *httptest.Server
+	fakeS3         *httptest.Server
+	testBucket     = "media"
 )
 
 var (
@@ -116,9 +121,15 @@ var _ = BeforeSuite(func() {
 	darkroomInternal := httptest.NewServer(darkroomStore.InternalHandler())
 	DeferCleanup(darkroomPublic.Close)
 	DeferCleanup(darkroomInternal.Close)
+	By("starting an in-memory S3 server")
+	s3Backend := s3mem.New()
+	Expect(s3Backend.CreateBucket(testBucket)).To(Succeed())
+	fakeS3 = httptest.NewServer(gofakes3.New(s3Backend).Server())
+	DeferCleanup(fakeS3.Close)
+
 	media := Media{
 		DarkroomURL: darkroomInternal.URL, DarkroomClaim: "manifesto-media-data",
-		SigningKey: testSigningKey, UploadTTL: testUploadTTL,
+		SigningKey: testSigningKey, UploadTTL: testUploadTTL, Namespace: testRouting.Herald.Namespace,
 	}
 
 	Expect(Setup(mgr, Options{Routing: testRouting, Media: media})).To(Succeed())
