@@ -1,0 +1,8 @@
+{
+  "name": "manifesto-desk-uitest",
+  "private": true,
+  "description": "Browser test for desk's UI, run by TestUI in internal/desk (DESK_UI_TEST=1).",
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}

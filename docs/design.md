@@ -341,6 +341,9 @@ status:
 - Markdown 編輯與即時預覽：預覽呼叫共用的 `internal/render`，套用真正的主題
 - 透過 watch 即時顯示 `phase` 變化
 - 編輯衝突以 `resourceVersion` 樂觀鎖偵測（API 回 409 時提示合併）；寫入用 Server-Side Apply，fieldManager 為 `manifesto-desk`
+- 登入用 OIDC authorization code + PKCE；ID token 與 refresh token 以 AES-GCM 加密存在 cookie（金鑰由 press 建立在 Secret `manifesto-desk-session`），desk 不保存任何 session，可以多副本
+- 代理只轉送 Manifesto 需要的路徑（manifesto.davy.tw 資源、events、RoleBinding、SelfSubject*Review），其他回 404；用 cookie 的寫入必須帶 `X-Manifesto-Desk` header 且 Origin 相同，防止 CSRF
+- 也接受 `Authorization: Bearer`（不經 cookie），方便腳本與測試
 
 ## 技術選型與待辦
 

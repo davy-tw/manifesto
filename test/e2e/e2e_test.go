@@ -60,7 +60,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("deploying the controller-manager")
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage), fmt.Sprintf("HERALD_IMG=%s", heraldImage),
-			fmt.Sprintf("DARKROOM_IMG=%s", darkroomImage))
+			fmt.Sprintf("DARKROOM_IMG=%s", darkroomImage), fmt.Sprintf("DESK_IMG=%s", deskImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
@@ -275,6 +275,7 @@ var _ = Describe("Manager", Ordered, func() {
 		registerMilestone1Specs()
 		registerMediaSpecs()
 		registerS3Specs()
+		registerDeskSpecs()
 
 		// TODO: Customize the e2e test suite with scenarios specific to your project.
 		// Consider applying sample/CR(s) and check their status and/or verifying
