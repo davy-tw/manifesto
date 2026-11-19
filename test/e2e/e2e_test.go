@@ -62,6 +62,11 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage), fmt.Sprintf("HERALD_IMG=%s", heraldImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+
+		if utils.Provider() == utils.ProviderK3d {
+			By("enabling press's gateway routing mode for Traefik")
+			enablePressRouting()
+		}
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,

@@ -1,0 +1,14 @@
+# Enables the Gateway API provider of the Traefik bundled with k3s, as in
+# docs/k3s.md. The chart's own default Gateway is not needed.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesGateway:
+        enabled: true
+    gateway:
+      enabled: false

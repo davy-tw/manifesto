@@ -1,0 +1,17 @@
+# The shared Gateway press attaches HTTPRoutes to in gateway mode. Traefik
+# requires listener ports equal to its entrypoint ports: web is 8000.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: manifesto
+  namespace: kube-system
+spec:
+  gatewayClassName: traefik
+  listeners:
+  - name: web
+    protocol: HTTP
+    port: 8000
+    hostname: "*.e2e.test"
+    allowedRoutes:
+      namespaces:
+        from: All

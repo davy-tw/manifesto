@@ -91,12 +91,41 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 30m
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+# The k3d variant runs the same suite on k3s with its bundled Traefik, the
+# first production target (docs/k3s.md). It also enables press's gateway
+# routing mode and checks that Traefik serves a Gazette end to end.
+K3D_CLUSTER ?= manifesto-test-e2e-k3d
+# K3S_IMAGE pins the k3s version the k3d cluster runs.
+K3S_IMAGE ?= rancher/k3s:v1.37.2-k3s1
+
+.PHONY: setup-test-e2e-k3d
+setup-test-e2e-k3d: ## Set up a k3d (k3s + Traefik) cluster for e2e tests if it does not exist
+	@command -v $(K3D) >/dev/null 2>&1 || { \
+		echo "k3d is not installed. Please install k3d manually."; \
+		exit 1; \
+	}
+	@if $(K3D) cluster get $(K3D_CLUSTER) >/dev/null 2>&1; then \
+		echo "k3d cluster '$(K3D_CLUSTER)' already exists. Skipping creation."; \
+	else \
+		echo "Creating k3d cluster '$(K3D_CLUSTER)'..."; \
+		$(K3D) cluster create $(K3D_CLUSTER) --image $(K3S_IMAGE) --wait --timeout 5m; \
+	fi
+
+.PHONY: test-e2e-k3d
+test-e2e-k3d: setup-test-e2e-k3d manifests generate fmt vet ## Run the e2e tests on k3d (k3s with Traefik).
+	E2E_PROVIDER=k3d K3D=$(K3D) K3D_CLUSTER=$(K3D_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 30m
+	$(MAKE) cleanup-test-e2e-k3d
+
+.PHONY: cleanup-test-e2e-k3d
+cleanup-test-e2e-k3d: ## Tear down the k3d cluster used for e2e tests
+	@$(K3D) cluster delete $(K3D_CLUSTER)
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -198,6 +227,7 @@ $(LOCALBIN):
 ## Tool Binaries
 KUBECTL ?= kubectl
 KIND ?= kind
+K3D ?= k3d
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest

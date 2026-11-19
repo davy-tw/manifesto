@@ -75,7 +75,7 @@ M1（MVP）與 M2（內容與網站）已完成。程式位置：
 - 網域歸屬（press 與 herald 共用）：`internal/domain`
 - 渲染與 view model：`internal/render`（內建主題在 `theme/`）
 - herald：`internal/herald`（`build.go` 快照、`feed.go` Wire 與 sitemap、`handler.go` 路由）
-- 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 上的 E2E 在 `test/e2e`；envtest 用的第三方 CRD 在 `test/crds`
+- 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 與 k3d（k3s + Traefik，`make test-e2e-k3d`，含 gateway 路由經過 Traefik 的驗證）上的 E2E 在 `test/e2e`，CI 兩者都跑；envtest 用的第三方 CRD 在 `test/crds`
 
 目標環境：先以 k3s（內建 Traefik）做小規模正式測試，見 `docs/k3s.md`。新功能要能在 k3s 上運作：Traefik 不支援 ListenerSet（v3.8 前）、listener port 必須是 entrypoint port（8000/8443）、預設 StorageClass `local-path` 只有 RWO。
 
