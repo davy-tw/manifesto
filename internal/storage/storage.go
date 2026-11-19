@@ -22,10 +22,14 @@ import (
 
 // Driver is one storage backend.
 type Driver interface {
-	// SignUpload returns a URL the file of size bytes can be PUT to until expires.
-	SignUpload(objectKey string, size int64, ttl time.Duration) (url string, expires time.Time, err error)
-	// Exists reports whether the object is stored (and therefore verified).
-	Exists(ctx context.Context, objectKey string) (bool, error)
+	// SignUpload returns a URL the file of size bytes and contentType can be
+	// PUT to until expires. Some backends require the PUT to send
+	// contentType as its Content-Type header.
+	SignUpload(ctx context.Context, objectKey, contentType string, size int64, ttl time.Duration) (url string, expires time.Time, err error)
+	// Stored reports whether the object is stored with the given size and
+	// the hash in its key. A backend that cannot verify uploads as they
+	// arrive verifies them here and deletes objects that do not match.
+	Stored(ctx context.Context, objectKey string, size int64) (bool, error)
 	// Delete removes the object; deleting a missing object is not an error.
 	Delete(ctx context.Context, objectKey string) error
 	// Check reports whether the backend is reachable.
@@ -92,8 +96,9 @@ func (p *PVC) client() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second}
 }
 
-// SignUpload implements Driver.
-func (p *PVC) SignUpload(objectKey string, size int64, ttl time.Duration) (string, time.Time, error) {
+// SignUpload implements Driver. darkroom ignores the Content-Type header and
+// serves files by their extension.
+func (p *PVC) SignUpload(_ context.Context, objectKey, _ string, size int64, ttl time.Duration) (string, time.Time, error) {
 	expires := p.now().Add(ttl).Truncate(time.Second)
 	q := signing.Query(p.Key, http.MethodPut, objectKey, size, expires)
 	return strings.TrimSuffix(p.PublicBase, "/") + "/upload/" + objectKey + "?" + q.Encode(), expires, nil
@@ -119,8 +124,9 @@ func (p *PVC) internal(ctx context.Context, method, objectKey string) (int, erro
 	return resp.StatusCode, nil
 }
 
-// Exists implements Driver.
-func (p *PVC) Exists(ctx context.Context, objectKey string) (bool, error) {
+// Stored implements Driver. darkroom verifies size and hash while it
+// receives an upload, so a stored file is a verified file.
+func (p *PVC) Stored(ctx context.Context, objectKey string, _ int64) (bool, error) {
 	code, err := p.internal(ctx, http.MethodHead, objectKey)
 	switch {
 	case err != nil:

@@ -2,7 +2,7 @@
 
 Manifesto 是完全 Kubernetes 原生的部落格引擎：文章、分類、主題和媒體都是 CRD，系統邏輯由 operator 處理，權限交給 K8s RBAC。設計見 [`docs/design.md`](docs/design.md)。
 
-目前進度：**M3（媒體）**的 PVC 後端完成，S3 後端待做。文章、分類（Section）、標籤（Stamp）、作者（Scribe）與主題（Typeset / ClusterTypeset）都是 CRD；herald 提供分頁列表、篩選頁、Wire（RSS）與 sitemap；press 可以替每個網域建立 Gateway API 路由與 cert-manager 憑證。
+目前進度：**M3（媒體）**完成，PVC（darkroom）與 S3 兩種後端都可以用。文章、分類（Section）、標籤（Stamp）、作者（Scribe）與主題（Typeset / ClusterTypeset）都是 CRD；herald 提供分頁列表、篩選頁、Wire（RSS）與 sitemap；press 可以替每個網域建立 Gateway API 路由與 cert-manager 憑證。
 
 | 元件 | 位置 | 職責 |
 |---|---|---|
@@ -58,6 +58,8 @@ kubectl get media -n blog-alice   # Phase 變成 Ready
 ```
 
 內容用 `![封面](print:hello-cover)` 引用，主題用 `{{ printurl "hello-cover" }}`、`.Dispatch.Cover`、`.Gazette.Logo`。上傳網址 5 分鐘內有效（`--upload-ttl`），逾時 Print 變成 `Failed`，刪掉重建即可。同 namespace 內容相同的檔案只存一份，最後一個引用的 Print 刪除時才刪檔。
+
+**改用 S3**：建立 bucket 和存放 `accessKeyID`、`secretAccessKey` 的 Secret，再建立 `s3` 後端的 Archive（見 `config/samples/manifesto_v1alpha1_archive_s3.yaml`）。Archive 讀自己 namespace 的 Secret；ClusterArchive 讀 `credentialsSecretRef.namespace`，沒填就讀 press 所在的 namespace。上傳時要帶 Print 的 Content-Type（`curl -T file -H "Content-Type: image/png" "$URL"`），它被簽進 presigned URL。S3 不會在上傳時驗證內容，所以 press 第一次看到物件時會下載核對 sha256，不符就刪除並回報 `UploadRejected`，可以在網址到期前重傳。訪客要能匿名讀取物件（bucket 開放讀取，或在前面接 CDN 並設定 `publicURL`）。
 
 press 第一次啟動會在 `manifesto-system` 建立簽章用的 Secret `manifesto-darkroom-keys`；要換 key 時，把舊 key 改名（例如 `previous`）並放入新的 `current`，darkroom 會同時接受兩者。
 

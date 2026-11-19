@@ -227,11 +227,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	namespace := os.Getenv("POD_NAMESPACE")
+	if namespace == "" {
+		namespace = "manifesto-system"
+	}
+	media.Namespace = namespace
 	if media.DarkroomURL != "" {
-		namespace := os.Getenv("POD_NAMESPACE")
-		if namespace == "" {
-			namespace = "manifesto-system"
-		}
 		c, err := client.New(mgr.GetConfig(), client.Options{Scheme: scheme})
 		if err == nil {
 			media.SigningKey, err = controller.EnsureSigningKey(context.Background(), c,

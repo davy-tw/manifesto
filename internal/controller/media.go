@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,6 +32,13 @@ type Media struct {
 	SigningKey []byte
 	// UploadTTL is how long an upload URL stays valid (default 5 minutes).
 	UploadTTL time.Duration
+	// Namespace is press's namespace, where a ClusterArchive's credentials
+	// Secret is looked up unless it names another namespace.
+	Namespace string
+	// Secrets reads S3 credentials. It should bypass the cache so press does
+	// not watch every Secret in the cluster; Setup uses the manager's
+	// API reader.
+	Secrets client.Reader
 }
 
 func (m Media) uploadTTL() time.Duration {
@@ -48,8 +56,11 @@ type errArchive struct {
 
 func (e *errArchive) Error() string { return e.err.Error() }
 
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
+
 // driverFor returns the storage driver of an Archive or ClusterArchive spec.
-func (m Media) driverFor(spec *v1.ArchiveSpec) (storage.Driver, error) {
+// archiveNamespace is the Archive's namespace, or "" for a ClusterArchive.
+func (m Media) driverFor(ctx context.Context, spec *v1.ArchiveSpec, archiveNamespace string) (storage.Driver, error) {
 	switch {
 	case spec.PVC != nil:
 		if len(m.SigningKey) == 0 || m.DarkroomURL == "" {
@@ -61,7 +72,7 @@ func (m Media) driverFor(spec *v1.ArchiveSpec) (storage.Driver, error) {
 		}
 		return &storage.PVC{InternalURL: m.DarkroomURL, PublicBase: spec.PVC.PublicURL, Key: m.SigningKey}, nil
 	case spec.S3 != nil:
-		return nil, &errArchive{v1.ReasonBackendError, errors.New("the s3 backend is not implemented yet")}
+		return m.s3Driver(ctx, spec.S3, archiveNamespace)
 	}
 	return nil, &errArchive{v1.ReasonBackendError, errors.New("no backend set")}
 }
@@ -100,4 +111,41 @@ func getArchive(ctx context.Context, c client.Client, namespace string, ref v1.A
 		return nil, &errArchive{v1.ReasonArchiveNotFound, fmt.Errorf("%s %q not found", kind, ref.Name)}
 	}
 	return spec, err
+}
+
+// Keys of an S3 credentials Secret.
+const (
+	secretAccessKeyID     = "accessKeyID"
+	secretSecretAccessKey = "secretAccessKey"
+)
+
+func (m Media) s3Driver(ctx context.Context, src *v1.S3ArchiveSource, archiveNamespace string) (storage.Driver, error) {
+	ns := archiveNamespace
+	if ns == "" {
+		ns = src.CredentialsSecretRef.Namespace
+		if ns == "" {
+			ns = m.Namespace
+		}
+	}
+	if m.Secrets == nil {
+		return nil, &errArchive{v1.ReasonBackendError, errors.New("press cannot read S3 credentials")}
+	}
+	var secret corev1.Secret
+	ref := types.NamespacedName{Namespace: ns, Name: src.CredentialsSecretRef.Name}
+	if err := m.Secrets.Get(ctx, ref, &secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, &errArchive{v1.ReasonBackendError, fmt.Errorf("credentials Secret %s not found", ref)}
+		}
+		return nil, err
+	}
+	id, key := string(secret.Data[secretAccessKeyID]), string(secret.Data[secretSecretAccessKey])
+	if id == "" || key == "" {
+		return nil, &errArchive{v1.ReasonBackendError,
+			fmt.Errorf("credentials Secret %s needs %q and %q", ref, secretAccessKeyID, secretSecretAccessKey)}
+	}
+	return storage.NewS3(storage.S3Config{
+		Endpoint: src.Endpoint, Region: src.Region, Bucket: src.Bucket,
+		PathStyle:   src.PathStyle == nil || *src.PathStyle,
+		AccessKeyID: id, SecretAccessKey: key, PublicURL: src.PublicURL,
+	}), nil
 }
