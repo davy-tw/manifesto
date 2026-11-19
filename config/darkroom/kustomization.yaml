@@ -1,0 +1,9 @@
+resources:
+- pvc.yaml
+- deployment.yaml
+- service.yaml
+- network_policy.yaml
+images:
+- name: darkroom
+  newName: darkroom
+  newTag: latest

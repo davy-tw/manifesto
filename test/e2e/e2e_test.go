@@ -59,7 +59,8 @@ var _ = Describe("Manager", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
 		By("deploying the controller-manager")
-		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage), fmt.Sprintf("HERALD_IMG=%s", heraldImage))
+		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage), fmt.Sprintf("HERALD_IMG=%s", heraldImage),
+			fmt.Sprintf("DARKROOM_IMG=%s", darkroomImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
@@ -72,8 +73,9 @@ var _ = Describe("Manager", Ordered, func() {
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
 	// and deleting the namespace.
 	AfterAll(func() {
-		By("cleaning up the Milestone 1 resources")
+		By("cleaning up the Milestone 1 and media resources")
 		cleanupMilestone1()
+		cleanupMedia()
 
 		By("cleaning up the curl pod for metrics")
 		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
@@ -271,6 +273,7 @@ var _ = Describe("Manager", Ordered, func() {
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 
 		registerMilestone1Specs()
+		registerMediaSpecs()
 
 		// TODO: Customize the e2e test suite with scenarios specific to your project.
 		// Consider applying sample/CR(s) and check their status and/or verifying

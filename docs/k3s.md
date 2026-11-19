@@ -115,7 +115,8 @@ k3s 用 containerd。沒有 registry 時，可以把 image 直接匯入節點：
 ```sh
 make docker-build IMG=manifesto-press:dev
 make docker-build COMPONENT=herald IMG=manifesto-herald:dev
-docker save manifesto-press:dev manifesto-herald:dev | sudo k3s ctr images import -
+make docker-build COMPONENT=darkroom IMG=manifesto-darkroom:dev
+docker save manifesto-press:dev manifesto-herald:dev manifesto-darkroom:dev | sudo k3s ctr images import -
 ```
 
 在 `config/manager/manager.yaml` 的 press 參數加上：
@@ -130,7 +131,7 @@ docker save manifesto-press:dev manifesto-herald:dev | sudo k3s ctr images impor
 然後部署：
 
 ```sh
-make deploy IMG=manifesto-press:dev HERALD_IMG=manifesto-herald:dev
+make deploy IMG=manifesto-press:dev HERALD_IMG=manifesto-herald:dev DARKROOM_IMG=manifesto-darkroom:dev
 ```
 
 `gateway` 模式不會建立 Certificate，所以不用設定 `--cluster-issuer`。
@@ -146,11 +147,33 @@ curl -sI https://alice.blog.example.io/
 
 `Routed` 是 False 時，message 會帶 Traefik 回報的原因。常見的原因是 Gateway listener 不允許該 namespace，或 hostname 對不上。
 
+## 7. 媒體（darkroom）
+
+darkroom 的 PVC 用 k3s 預設的 `local-path`，資料在節點的 `/var/lib/rancher/k3s/storage` 底下，備份時要一起備份（文章本身在 etcd，用 k3s 的 etcd snapshot）。`local-path` 只有 RWO，所以 darkroom 只跑一個副本、更新時先停再起。
+
+讓訪客讀得到檔案：替媒體網域建一條 HTTPRoute，掛到同一個 Gateway（`*.blog.example.io` 底下的網域就能共用萬用字元憑證）：
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: media
+  namespace: manifesto-system
+spec:
+  parentRefs:
+  - {name: manifesto, namespace: kube-system, sectionName: websecure}
+  hostnames: ["media.blog.example.io"]
+  rules:
+  - backendRefs:
+    - {name: manifesto-darkroom, port: 80}
+```
+
+再建立 ClusterArchive，`publicURL: https://media.blog.example.io`。
+
 ## CI 上的對應測試
 
-`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 3 步與第 5 步設定（只用 HTTP listener，不測 TLS），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 讀得到文章。設定檔在 `test/e2e/k3d/`。
+`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 3 步與第 5 步設定（只用 HTTP listener，不測 TLS），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 讀得到文章，並上傳一個 Print 經過 darkroom 存取。設定檔在 `test/e2e/k3d/`。
 
 ## 之後的里程碑要注意的地方
 
-- **M3 媒體**：k3s 預設的 `local-path` StorageClass 只支援 RWO，darkroom 用 PVC driver 時只能跑一個副本
 - **單節點**：herald 預設 2 個副本，可以留著讓 rolling update 不中斷

@@ -324,6 +324,9 @@ status:
 - 寫入時邊收邊計算 sha256，不符就拒絕；先寫暫存檔，驗證通過再 `rename`
 - 檔案路徑分兩層目錄，例如 `/data/<namespace UID>/sha256/9f/2c/9f2c…e1.png`
 - 刪除 API 只在叢集內開放，用 NetworkPolicy 限制只有 press 能連
+- 簽章是 HMAC-SHA256，涵蓋 method、物件 key、大小與到期時間，一個網址只能做那一件事
+- press 無法得知上傳何時完成，Pending 的 Print 每 2 秒檢查一次，直到上傳網址到期；到期仍未上傳就設成 `Failed`
+- Print 不存在或還沒 Ready 時，Markdown 裡的圖片會被移除、連結只留文字，Dispatch 的 `Ready` 回報 `PrintNotReady`
 
 文章內容存在 etcd，所以備份媒體時 etcd 也要一起備份。
 
@@ -353,7 +356,7 @@ status:
 
 1. **M1 MVP**（已完成）：專案骨架、Gazette + Dispatch CRD、press 狀態機與 `Rendered` condition、herald + 內建預設主題、envtest 與單元測試
 2. **M2 內容與網站**（已完成）：Section、Stamp、Scribe、Typeset / ClusterTypeset、Wire 與 sitemap、分頁與篩選、HTTPRoute + cert-manager
-3. **M3 媒體**：Print、Archive、darkroom（先 PVC driver，再 S3）
+3. **M3 媒體**（PVC 後端已完成，S3 待做）：Print、Archive、darkroom（先 PVC driver，再 S3）
 4. **M4 管理介面**：desk
 5. **M5 補完**：Edition、mfctl、Helm chart
 

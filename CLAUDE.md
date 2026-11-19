@@ -69,10 +69,11 @@ Manifesto 是完全 Kubernetes 原生的部落格引擎：內容都是 CRD，邏
 
 ## 里程碑
 
-M1（MVP）與 M2（內容與網站）已完成。程式位置：
+M1（MVP）、M2（內容與網站）已完成；M3（媒體）的 PVC 後端已完成。程式位置：
 
 - press：`internal/controller`（`setup.go` 註冊 index 與所有 controller；狀態機 `phase.go`；主題解析 `theme.go`；路由 `routing.go`）
 - 網域歸屬（press 與 herald 共用）：`internal/domain`
+- 媒體：`internal/storage`（StorageDriver 與 PVC driver）、`internal/signing`（press 與 darkroom 共用的 HMAC 簽章）、`internal/darkroom` 與 `cmd/darkroom`；press 的 `print_controller.go`、`archive_controller.go`、`signingkey.go`
 - 渲染與 view model：`internal/render`（內建主題在 `theme/`）
 - herald：`internal/herald`（`build.go` 快照、`feed.go` Wire 與 sitemap、`handler.go` 路由）
 - 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 與 k3d（k3s + Traefik，`make test-e2e-k3d`，含 gateway 路由經過 Traefik 的驗證）上的 E2E 在 `test/e2e`，CI 兩者都跑；envtest 用的第三方 CRD 在 `test/crds`
@@ -81,4 +82,6 @@ M1（MVP）與 M2（內容與網站）已完成。程式位置：
 
 路由慣例：press 以 `--gateway-name` 啟用，`--routing-mode=gateway`（k3s 用）只建立掛到 Gateway 的 HTTPRoute；預設的 `listenerset` 模式下，每個擁有網域的 Gazette 在自己的 namespace 得到 `manifesto-<gazette>` 的 ListenerSet、HTTPRoute、`-redirect` HTTPRoute 與 Certificate（ownerReference 回收，不用 finalizer），herald 的 namespace 有每個 namespace 一個的 ReferenceGrant。
 
-下一個里程碑：M3（媒體）— Print、Archive / ClusterArchive、darkroom（先 PVC driver，再 S3）。範圍外：desk、Edition、mfctl。
+媒體慣例：物件 key 為 `<namespace UID>/sha256/<hash>.<ext>`；Pending 的 Print 每 2 秒輪詢 `Exists`；Print 有 finalizer `manifesto.davy.tw/stored-object`，同 namespace 沒有其他 Print 用同一個物件時才刪檔。darkroom 只用 RWO PVC，單一副本、`Recreate`。
+
+下一步：M3 的 S3 driver（只用標準 S3 API，`internal/storage` 加一個實作），然後 M4（desk）。範圍外：Edition、mfctl。
