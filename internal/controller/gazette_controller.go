@@ -29,6 +29,7 @@ import (
 	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 	"go.pkgs.davy.tw/manifesto/internal/domain"
 	"go.pkgs.davy.tw/manifesto/internal/render"
+	"go.pkgs.davy.tw/manifesto/internal/sitedata"
 )
 
 // GazetteReconciler reports whether each Gazette owns its domain and has a
@@ -63,7 +64,7 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 	owner := domain.Owners(peers.Items)[domain.Normalize(g.Spec.Domain)]
-	theme, err := resolveTheme(ctx, r.Client, &g)
+	theme, err := sitedata.ResolveTheme(ctx, r.Client, &g)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -81,10 +82,10 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		ready.Status = metav1.ConditionFalse
 		ready.Reason = v1.ReasonDomainConflict
 		ready.Message = fmt.Sprintf("Domain %s is already served by Gazette %s/%s", g.Spec.Domain, owner.Namespace, owner.Name)
-	case theme.err != nil:
+	case theme.Err != nil:
 		ready.Status = metav1.ConditionFalse
-		ready.Reason = theme.reason
-		ready.Message = render.TruncateMessage(theme.err.Error())
+		ready.Reason = theme.Reason
+		ready.Message = render.TruncateMessage(theme.Err.Error())
 	}
 
 	status := v1.GazetteStatus{

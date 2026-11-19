@@ -29,6 +29,7 @@ import (
 
 	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 	"go.pkgs.davy.tw/manifesto/internal/render"
+	"go.pkgs.davy.tw/manifesto/internal/sitedata"
 )
 
 // DispatchReconciler decides the phase of each Dispatch, schedules embargoed
@@ -65,7 +66,7 @@ func (r *DispatchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, err
 		}
 	}
-	tax, err := taxonomyFor(ctx, r.Client, &d, scribe)
+	tax, err := sitedata.Taxonomy(ctx, r.Client, &d, scribe)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -162,16 +163,16 @@ func (r *DispatchReconciler) renderedCondition(ctx context.Context, d *v1.Dispat
 		Message:            "Content renders with the Gazette's theme",
 		ObservedGeneration: d.Generation,
 	}
-	theme, err := resolveTheme(ctx, r.Client, gazette)
+	theme, err := sitedata.ResolveTheme(ctx, r.Client, gazette)
 	if err != nil {
 		return c, err
 	}
-	if theme.theme == nil {
-		c.Status, c.Reason = metav1.ConditionFalse, theme.reason
-		c.Message = render.TruncateMessage(theme.err.Error())
+	if theme.Theme == nil {
+		c.Status, c.Reason = metav1.ConditionFalse, theme.Reason
+		c.Message = render.TruncateMessage(theme.Err.Error())
 		return c, nil
 	}
-	if _, err := render.NewSite(theme.theme, gazette, theme.params, tax).DispatchPage(d); err != nil {
+	if _, err := render.NewSite(theme.Theme, gazette, theme.Params, tax).DispatchPage(d); err != nil {
 		c.Status = metav1.ConditionFalse
 		c.Reason = render.ReasonOf(err)
 		c.Message = render.TruncateMessage(err.Error())
