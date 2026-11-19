@@ -123,6 +123,8 @@ spec:
 // cleanupMilestone1 removes what the M1 specs created.
 func cleanupMilestone1() {
 	_, _ = utils.Run(exec.Command("kubectl", "delete", "pod", heraldCurlPod, "-n", namespace, "--ignore-not-found"))
+	_, _ = utils.Run(exec.Command("kubectl", "delete", "pod", "curl-tls", "-n", "kube-system", "--ignore-not-found",
+		"--wait=false"))
 	_, _ = utils.Run(exec.Command("kubectl", "delete", "ns", blogNamespace, "--ignore-not-found"))
 }
 

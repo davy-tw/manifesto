@@ -263,7 +263,7 @@ kubectl create rolebinding editors -n blog-alice --clusterrole=manifesto-editor 
 
 ## CI 上的對應測試
 
-`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 3 步與第 5 步設定（用 Helm chart 安裝，只用 HTTP listener，不測 TLS），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 讀得到文章，並上傳一個 Print 經過 darkroom 存取。desk 以 ServiceAccount token 代替 OIDC token，確認它用呼叫者的權限讀寫與預覽（OIDC 登入流程由 envtest 與 Playwright 的 `make test-ui` 涵蓋）。設定檔在 `test/e2e/k3d/`。
+`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 5 步設定（用 Helm chart 安裝；TLS 用 cert-manager 從自簽 CA 簽發的 `*.e2e.test` 萬用字元憑證代替 Let's Encrypt），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 以 HTTPS 讀得到文章（curl 只信任測試 CA，不用 `-k`；沒有 CA 時驗證會失敗；`web` listener 不提供文章），並上傳一個 Print 經過 darkroom 存取。desk 以 ServiceAccount token 代替 OIDC token，確認它用呼叫者的權限讀寫與預覽（OIDC 登入流程由 envtest 與 Playwright 的 `make test-ui` 涵蓋）。設定檔在 `test/e2e/k3d/`。
 
 ## 之後的里程碑要注意的地方
 
