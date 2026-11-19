@@ -68,7 +68,7 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
+test: manifests generate fmt vet setup-envtest kustomize helm ## Run tests (test/chart needs helm and kustomize).
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
@@ -155,6 +155,15 @@ build: manifests generate fmt vet mfctl ## Build every component and mfctl.
 	go build -o bin/herald ./cmd/herald
 	go build -o bin/darkroom ./cmd/darkroom
 	go build -o bin/desk ./cmd/desk
+
+.PHONY: chart
+chart: manifests kustomize ## Regenerate the Helm chart's CRDs and RBAC from config/.
+	"$(KUSTOMIZE)" build config/default | go run ./hack/chartfiles charts/manifesto/files
+
+.PHONY: chart-lint
+chart-lint: chart helm ## Lint the Helm chart and fail if its generated files are stale.
+	"$(HELM)" lint charts/manifesto --set desk.publicURL=https://desk.example.io
+	@git diff --exit-code -- charts/manifesto/files || { echo "charts/manifesto/files is stale: run make chart and commit"; exit 1; }
 
 MFCTL_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 .PHONY: mfctl
@@ -248,12 +257,14 @@ KUBECTL ?= kubectl
 KIND ?= kind
 K3D ?= k3d
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
+HELM ?= $(LOCALBIN)/helm
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
+HELM_VERSION ?= v4.3.1
 CONTROLLER_TOOLS_VERSION ?= v0.22.0
 
 #ENVTEST_VERSION is the controller-runtime version to use for setup-envtest, derived from go.mod
@@ -271,6 +282,11 @@ GOLANGCI_LINT_VERSION ?= v2.13.1
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+
+.PHONY: helm
+helm: $(HELM) ## Download helm locally if necessary.
+$(HELM): $(LOCALBIN)
+	$(call go-install-tool,$(HELM),helm.sh/helm/v4/cmd/helm,$(HELM_VERSION))
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.

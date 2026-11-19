@@ -1,0 +1,130 @@
+{{- if .Values.darkroom.enabled }}
+{{- $d := .Values.darkroom }}
+{{- if not $d.persistence.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: manifesto-media-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "darkroom") | nindent 4 }}
+  annotations:
+    # The media files live here: keep them when the release is uninstalled.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $d.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $d.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: manifesto-darkroom
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "darkroom") | nindent 4 }}
+spec:
+  # One replica on a ReadWriteOnce volume: stop the old pod before the new one.
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      app.kubernetes.io/component: darkroom
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: manifesto
+        app.kubernetes.io/component: darkroom
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      {{- include "manifesto.podScheduling" (list $ $d) | nindent 6 }}
+      containers:
+      - name: darkroom
+        image: {{ include "manifesto.image" (list $ $d.image) }}
+        imagePullPolicy: {{ $d.image.pullPolicy }}
+        command: [/manager]
+        args:
+        - --data-dir=/data
+        - --keys-dir=/etc/darkroom/keys
+        - --public-address=:8080
+        - --internal-address=:8081
+        ports:
+        - {name: http, containerPort: 8080, protocol: TCP}
+        - {name: internal, containerPort: 8081, protocol: TCP}
+        livenessProbe:
+          httpGet: {path: /healthz, port: http}
+          periodSeconds: 20
+        readinessProbe:
+          httpGet: {path: /healthz, port: http}
+          periodSeconds: 5
+        resources:
+          {{- toYaml $d.resources | nindent 10 }}
+        securityContext:
+          {{- include "manifesto.containerSecurity" . | nindent 10 }}
+        volumeMounts:
+        - {name: data, mountPath: /data}
+        - {name: keys, mountPath: /etc/darkroom/keys, readOnly: true}
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ default "manifesto-media-data" $d.persistence.existingClaim }}
+      # Created by press.
+      - name: keys
+        secret:
+          secretName: manifesto-darkroom-keys
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: manifesto-darkroom
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "darkroom") | nindent 4 }}
+spec:
+  ports:
+  - {name: http, port: 80, targetPort: http}
+  - {name: internal, port: 8081, targetPort: internal}
+  selector:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: darkroom
+{{- if $d.networkPolicy }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: manifesto-darkroom
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "darkroom") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      app.kubernetes.io/component: darkroom
+  policyTypes: [Ingress]
+  ingress:
+  # Anyone may fetch files and upload with a signed URL.
+  - ports:
+    - port: http
+  # Only press checks for and deletes files.
+  - from:
+    - podSelector:
+        matchLabels:
+          control-plane: controller-manager
+    ports:
+    - port: internal
+{{- end }}
+{{- end }}

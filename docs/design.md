@@ -351,6 +351,13 @@ status:
 - `print upload FILE`：算 sha256、以 Server-Side Apply 建立 Print、PUT 到 `status.uploadURL`、等 press 核對後 Ready；同 namespace 已有相同檔案就直接 Ready。只有一個 Archive / ClusterArchive 時自動選用
 - `edition list | show | restore`：restore 用帶 resourceVersion 的 merge patch，因為還原必須移除 Edition 沒有的欄位（apply 只會移除自己設定過的欄位），並在有人同時修改時拒絕而不是覆蓋
 
+## 安裝
+
+- Helm chart `charts/manifesto` 與 kustomize `config/default` 建立相同的資源與名稱（`manifesto-*`），一個叢集裝一次
+- chart 的 CRD 與 RBAC 不手寫：`make chart` 從 kustomize 的輸出產生 `charts/manifesto/files/`，CI 檢查有沒有過期；`test/chart` 比對兩者的物件、CRD、RBAC 與 Pod 設定
+- CRD 放在 templates（不是 `crds/`），升級時才會更新；CRD 和媒體 PVC 加上 `helm.sh/resource-policy: keep`
+- k3d 的 E2E 用 Helm 安裝（gateway 模式），Kind 的 E2E 用 kustomize
+
 ## desk（管理介面）
 
 - SPA + 後端；後端負責 OIDC 登入、session cookie，並把請求代理到 API server。SPA 不直接連 API server
@@ -384,7 +391,7 @@ status:
 2. **M2 內容與網站**（已完成）：Section、Stamp、Scribe、Typeset / ClusterTypeset、Wire 與 sitemap、分頁與篩選、HTTPRoute + cert-manager
 3. **M3 媒體**（已完成）：Print、Archive、darkroom（先 PVC driver，再 S3）
 4. **M4 管理介面**（已完成）：desk，以及 `proofreader`、`editor`、`publisher` 三個 ClusterRole
-5. **M5 補完**：Edition、mfctl、Helm chart
+5. **M5 補完**（已完成）：Edition、mfctl、Helm chart
 
 **待辦與未來功能**
 

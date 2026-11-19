@@ -1,0 +1,86 @@
+{{- if .Values.desk.enabled }}
+{{- $d := .Values.desk }}
+{{- $public := required "desk.publicURL is required, e.g. https://desk.example.io (or set desk.enabled=false)" $d.publicURL }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: manifesto-desk
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "desk") | nindent 4 }}
+spec:
+  replicas: {{ $d.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      app.kubernetes.io/component: desk
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: manifesto
+        app.kubernetes.io/component: desk
+    spec:
+      serviceAccountName: manifesto-desk
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      {{- include "manifesto.podScheduling" (list $ $d) | nindent 6 }}
+      containers:
+      - name: desk
+        image: {{ include "manifesto.image" (list $ $d.image) }}
+        imagePullPolicy: {{ $d.image.pullPolicy }}
+        command: [/manager]
+        args:
+        - --bind-address=:8080
+        - --public-url={{ $public }}
+        - --session-key-file=/etc/desk/session/key
+        {{- with $d.oidc.issuer }}
+        - --oidc-issuer={{ . }}
+        - --oidc-client-id={{ $d.oidc.clientID }}
+        - --oidc-scopes={{ join "," $d.oidc.scopes }}
+        {{- end }}
+        {{- if $d.tokenSignIn }}
+        - --token-sign-in
+        {{- end }}
+        env:
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ $d.oidc.clientSecretName }}
+              key: clientSecret
+              optional: true
+        ports:
+        - {name: http, containerPort: 8080, protocol: TCP}
+        livenessProbe:
+          httpGet: {path: /healthz, port: http}
+          periodSeconds: 20
+        readinessProbe:
+          httpGet: {path: /healthz, port: http}
+          periodSeconds: 5
+        resources:
+          {{- toYaml $d.resources | nindent 10 }}
+        securityContext:
+          {{- include "manifesto.containerSecurity" . | nindent 10 }}
+        volumeMounts:
+        - {name: session, mountPath: /etc/desk/session, readOnly: true}
+      volumes:
+      # Created by press.
+      - name: session
+        secret:
+          secretName: manifesto-desk-session
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: manifesto-desk
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "desk") | nindent 4 }}
+spec:
+  ports:
+  - {name: http, port: 80, targetPort: http}
+  selector:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: desk
+{{- end }}

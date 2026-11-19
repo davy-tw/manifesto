@@ -34,6 +34,31 @@ curl -H 'Host: alice.localtest.me' http://localhost:8080/posts/hello-k8s
 
 ## 部署
 
+可以用 Helm chart（`charts/manifesto`）或 kustomize（`make deploy`）安裝，兩者建立的資源相同（`test/chart` 會比對）。
+
+### Helm
+
+```sh
+kubectl create namespace manifesto-system
+helm install manifesto charts/manifesto -n manifesto-system \
+  --set imageRegistry=<registry> \
+  --set desk.publicURL=https://desk.example.io
+```
+
+常用的值（完整說明見 `charts/manifesto/values.yaml`）：
+
+| 值 | 說明 |
+|---|---|
+| `imageRegistry`、`<元件>.image.repository/tag` | image 位置；tag 預設是 chart 的 appVersion |
+| `press.routing.*` | Gateway 路由（`gatewayName`、`gatewayNamespace`、`mode`、`gatewaySection`、`clusterIssuer`） |
+| `press.editions` | 每篇保留的 Edition 數 |
+| `darkroom.enabled`、`darkroom.persistence.*` | 媒體（pvc Archive）與它的 PVC；全部用 S3 時可以關掉 |
+| `desk.publicURL`、`desk.oidc.*`、`desk.tokenSignIn` | desk 的網址與登入方式 |
+
+一個叢集只安裝一次：press 管理所有 namespace，角色名稱（`manifesto-editor` 等）也是固定的。CRD 與媒體的 PVC 在 `helm uninstall` 時保留，因為刪掉 CRD 會刪掉所有文章。
+
+### kustomize
+
 ```sh
 make docker-build docker-push IMG=<registry>/manifesto-press:<tag>
 make docker-build docker-push COMPONENT=herald IMG=<registry>/manifesto-herald:<tag>

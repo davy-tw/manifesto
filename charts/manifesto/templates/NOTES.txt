@@ -1,0 +1,14 @@
+Manifesto is installed in {{ .Release.Namespace }}.
+
+- Visitors: route each Gazette's domain to the Service manifesto-herald
+  {{- if .Values.press.routing.gatewayName }} (press does this through the Gateway {{ .Values.press.routing.gatewayNamespace }}/{{ .Values.press.routing.gatewayName }}){{ end }}.
+{{- if .Values.desk.enabled }}
+- Authors: desk is the Service manifesto-desk, expected at {{ .Values.desk.publicURL }}.
+{{- if not (or .Values.desk.oidc.issuer .Values.desk.tokenSignIn) }}
+  No sign-in method is set (desk.oidc.issuer or desk.tokenSignIn): desk only serves API clients with bearer tokens.
+{{- end }}
+{{- end }}
+- Give people a role in a publication's namespace:
+    kubectl create rolebinding editors -n <namespace> --clusterrole=manifesto-editor --group=<group>
+
+Custom resources and the media volume are kept when the release is uninstalled.

@@ -120,6 +120,36 @@ make docker-build COMPONENT=desk IMG=manifesto-desk:dev
 docker save manifesto-press:dev manifesto-herald:dev manifesto-darkroom:dev manifesto-desk:dev | sudo k3s ctr images import -
 ```
 
+用 Helm chart 安裝，打開 gateway 路由模式：
+
+```yaml
+# values-k3s.yaml
+press:
+  image: {tag: dev}
+  routing:
+    mode: gateway
+    gatewayName: manifesto
+    gatewayNamespace: kube-system
+    gatewaySection: websecure
+herald: {image: {tag: dev}}
+darkroom: {image: {tag: dev}}
+desk:
+  image: {tag: dev}
+  publicURL: https://desk.blog.example.io
+  tokenSignIn: true        # 還沒有 OIDC 時（見第 8 步）
+```
+
+```sh
+kubectl create namespace manifesto-system
+make helm   # 或用你自己的 helm
+bin/helm install manifesto charts/manifesto -n manifesto-system -f values-k3s.yaml --wait
+```
+
+`gateway` 模式不會建立 Certificate，所以不用設定 `press.routing.clusterIssuer`。
+
+<details>
+<summary>改用 kustomize</summary>
+
 在 `config/manager/manager.yaml` 的 press 參數加上：
 
 ```yaml
@@ -136,7 +166,7 @@ make deploy IMG=manifesto-press:dev HERALD_IMG=manifesto-herald:dev DARKROOM_IMG
   DESK_IMG=manifesto-desk:dev
 ```
 
-`gateway` 模式不會建立 Certificate，所以不用設定 `--cluster-issuer`。
+</details>
 
 ## 6. 確認
 
@@ -202,7 +232,7 @@ kube-apiserver-arg:
 
 API server 會定期重新讀取這個檔案，之後改 issuer 或 claim 對應不用再重啟。用 `kubectl auth whoami`（帶上 OIDC token）可以確認對應出來的使用者名稱與群組。
 
-設定 desk：在 `config/desk/deployment.yaml` 把 `--public-url` 改成 `https://desk.blog.example.io`，打開 `--oidc-issuer=https://auth.example.io`。confidential client 再建立 client secret：
+設定 desk：Helm 設 `desk.oidc.issuer=https://auth.example.io`（kustomize 則在 `config/desk/deployment.yaml` 打開 `--oidc-issuer`）。confidential client 再建立 client secret：
 
 ```sh
 kubectl -n manifesto-system create secret generic manifesto-desk-oidc --from-literal=clientSecret=<secret>
@@ -233,7 +263,7 @@ kubectl create rolebinding editors -n blog-alice --clusterrole=manifesto-editor 
 
 ## CI 上的對應測試
 
-`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 3 步與第 5 步設定（只用 HTTP listener，不測 TLS），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 讀得到文章，並上傳一個 Print 經過 darkroom 存取。desk 以 ServiceAccount token 代替 OIDC token，確認它用呼叫者的權限讀寫與預覽（OIDC 登入流程由 envtest 與 Playwright 的 `make test-ui` 涵蓋）。設定檔在 `test/e2e/k3d/`。
+`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 3 步與第 5 步設定（用 Helm chart 安裝，只用 HTTP listener，不測 TLS），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 讀得到文章，並上傳一個 Print 經過 darkroom 存取。desk 以 ServiceAccount token 代替 OIDC token，確認它用呼叫者的權限讀寫與預覽（OIDC 登入流程由 envtest 與 Playwright 的 `make test-ui` 涵蓋）。設定檔在 `test/e2e/k3d/`。
 
 ## 之後的里程碑要注意的地方
 

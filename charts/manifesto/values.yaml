@@ -1,0 +1,107 @@
+# Manifesto installs into the release namespace (create it first, e.g.
+# manifesto-system). Resources keep the names the kustomize install uses
+# (manifesto-*), so install the chart once per cluster: press works across
+# all namespaces, and people are granted the cluster roles
+# manifesto-proofreader, manifesto-editor and manifesto-publisher by name.
+
+# imageRegistry is prepended to every image repository, e.g. ghcr.io/me.
+imageRegistry: ""
+imagePullSecrets: []
+
+# press: the operator.
+press:
+  image:
+    repository: manifesto-press
+    # tag defaults to the chart's appVersion.
+    tag: ""
+    pullPolicy: IfNotPresent
+  # How many Editions (revisions) to keep per Dispatch; negative stops recording.
+  editions: 20
+  # How long a Print's upload URL stays valid.
+  uploadTTL: 5m
+  # Routing: press attaches each Gazette's domain to a Gateway. Leave
+  # gatewayName empty to route yourself.
+  routing:
+    gatewayName: ""
+    gatewayNamespace: ""
+    # listenerset: a ListenerSet, HTTPRoutes and a Certificate per Gazette.
+    # gateway: HTTPRoutes on the Gateway's own listeners (k3s's Traefik).
+    mode: listenerset
+    # gateway mode: the Gateway listener (sectionName) to attach to.
+    gatewaySection: ""
+    # listenerset mode: listener ports and the cert-manager ClusterIssuer.
+    listenerHTTPSPort: 443
+    listenerHTTPPort: 80
+    clusterIssuer: ""
+  extraArgs: []
+  resources:
+    limits: {cpu: 500m, memory: 128Mi}
+    requests: {cpu: 10m, memory: 64Mi}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# herald: serves the sites to visitors.
+herald:
+  image:
+    repository: manifesto-herald
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    limits: {cpu: 500m, memory: 256Mi}
+    requests: {cpu: 10m, memory: 64Mi}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# darkroom: stores media for pvc Archives on a ReadWriteOnce volume, so it
+# runs one replica and is replaced, not rolled. Disable it when every
+# Archive uses S3.
+darkroom:
+  enabled: true
+  image:
+    repository: manifesto-darkroom
+    tag: ""
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 10Gi
+    # Empty uses the cluster's default StorageClass (local-path on k3s).
+    storageClassName: ""
+    # existingClaim serves an existing PersistentVolumeClaim instead.
+    existingClaim: ""
+  # Only press may reach darkroom's internal port.
+  networkPolicy: true
+  resources:
+    limits: {cpu: 500m, memory: 256Mi}
+    requests: {cpu: 10m, memory: 32Mi}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# desk: the authors' web UI. It acts with each user's own token and has no
+# permissions of its own.
+desk:
+  enabled: true
+  image:
+    repository: manifesto-desk
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 2
+  # publicURL is desk's address, e.g. https://desk.example.io (required).
+  publicURL: ""
+  oidc:
+    # issuer turns on OIDC sign-in; the API server must trust it too.
+    issuer: ""
+    clientID: manifesto-desk
+    scopes: [openid, email, profile]
+    # The client secret, if any, is read from this Secret's clientSecret key.
+    clientSecretName: manifesto-desk-oidc
+  # tokenSignIn lets users sign in by pasting a token (kubectl create token).
+  tokenSignIn: false
+  resources:
+    limits: {cpu: 500m, memory: 128Mi}
+    requests: {cpu: 10m, memory: 32Mi}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
