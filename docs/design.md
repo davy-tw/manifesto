@@ -1,6 +1,6 @@
 # Manifesto 設計文件
 
-> Go module：`go.pkgs.davy.tw/manifesto`。API group 暫用 `manifesto.davy.tw`，確定網域後全域替換。
+> Go module：`go.pkgs.davy.tw/manifesto`。API group：`manifesto.davy.tw`。
 
 ## 概述
 
@@ -69,7 +69,7 @@ Manifesto 是完全 Kubernetes 原生的部落格引擎：文章、分類、主�
 
 ## CRD 設計
 
-所有資源使用 API group `manifesto.davy.tw`（暫定網域，確定後全域替換），版本從 `v1alpha1` 開始。spec 是使用者期望的狀態，status 是 press 觀察到的實際狀態。
+所有資源使用 API group `manifesto.davy.tw`，版本從 `v1alpha1` 開始。spec 是使用者期望的狀態，status 是 press 觀察到的實際狀態。
 
 **Gazette**：一個站台。一個 namespace 可以有多個 Gazette。
 
@@ -359,7 +359,7 @@ status:
 1. **M1 MVP**（已完成）：專案骨架、Gazette + Dispatch CRD、press 狀態機與 `Rendered` condition、herald + 內建預設主題、envtest 與單元測試
 2. **M2 內容與網站**（已完成）：Section、Stamp、Scribe、Typeset / ClusterTypeset、Wire 與 sitemap、分頁與篩選、HTTPRoute + cert-manager
 3. **M3 媒體**（已完成）：Print、Archive、darkroom（先 PVC driver，再 S3）
-4. **M4 管理介面**：desk
+4. **M4 管理介面**：desk，以及 `proofreader`、`editor`、`publisher` 三個 ClusterRole
 5. **M5 補完**：Edition、mfctl、Helm chart
 
 **待辦與未來功能**
@@ -369,7 +369,6 @@ status:
 - [ ] Letter：讀者留言，預計做成 Aggregated API Server，背後接資料庫
 - [ ] Issue：電子報，每期收錄多篇 Dispatch
 - [ ] 搜尋功能：尚未討論
-- [ ] 確認 API group 的網域，並在 GitHub 與網域註冊商確認名稱未被使用
 
 已決定不做：聯合供稿，也就是一篇 Dispatch 同時刊在多個 Gazette。每篇 Dispatch 只屬於一個 Gazette，gazetteRef 維持單一值。
 

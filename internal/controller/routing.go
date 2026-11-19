@@ -92,7 +92,7 @@ const (
 	listenerHTTP  = "http"
 
 	// labelNamespace marks a ReferenceGrant with the namespace it admits.
-	labelNamespace = "manifesto." + v1.GroupName + "/namespace"
+	labelNamespace = v1.GroupName + "/namespace"
 	labelManagedBy = "app.kubernetes.io/managed-by"
 )
 
