@@ -73,14 +73,15 @@ func NewS3(cfg S3Config) *S3 {
 }
 
 // SignUpload implements Driver. The PUT must send contentType as its
-// Content-Type header, which is signed so the stored object is served with it.
+// Content-Type header, which is signed so the stored object is served with
+// it. Nothing else is signed: every signed header is one more header the
+// uploader has to send. Long-lived caching of the immutable objects belongs
+// to whatever serves publicURL (a CDN or a route in front of the bucket).
 func (d *S3) SignUpload(ctx context.Context, objectKey, contentType string, _ int64, ttl time.Duration) (string, time.Time, error) {
 	req, err := d.presign.PresignPutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(d.cfg.Bucket),
 		Key:         aws.String(objectKey),
 		ContentType: aws.String(contentType),
-		// Content-addressed objects never change.
-		CacheControl: aws.String("public, max-age=31536000, immutable"),
 	}, s3.WithPresignExpires(ttl))
 	if err != nil {
 		return "", time.Time{}, err

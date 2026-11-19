@@ -328,7 +328,7 @@ status:
 - press 無法得知上傳何時完成，Pending 的 Print 每 2 秒檢查一次，直到上傳網址到期；到期仍未上傳就設成 `Failed`
 - Print 不存在或還沒 Ready 時，Markdown 裡的圖片會被移除、連結只留文字，Dispatch 的 `Ready` 回報 `PrintNotReady`
 
-**S3 後端**只用標準 S3 API：presigned `PutObject`（簽入 Content-Type 與 `Cache-Control: immutable`）、`HeadObject`、`GetObject`、`DeleteObject`、`HeadBucket`。S3 無法在上傳時驗證內容，press 第一次看到物件時下載並核對大小與 sha256，不符就刪除並回報 `UploadRejected`；核對過的物件記在記憶體中，不重複下載。憑證放在 Secret（`accessKeyID`、`secretAccessKey`），press 直接向 API server 讀取，不快取、不監看所有 Secret，只需要 `get` 權限。
+**S3 後端**只用標準 S3 API：presigned `PutObject`（只簽入 Content-Type，上傳者只需帶這個 header；長期快取由 `publicURL` 前的 CDN 或路由設定）、`HeadObject`、`GetObject`、`DeleteObject`、`HeadBucket`。S3 無法在上傳時驗證內容，press 第一次看到物件時下載並核對大小與 sha256，不符就刪除並回報 `UploadRejected`；核對過的物件記在記憶體中，不重複下載。憑證放在 Secret（`accessKeyID`、`secretAccessKey`），press 直接向 API server 讀取，不快取、不監看所有 Secret，只需要 `get` 權限。
 
 文章內容存在 etcd，所以備份媒體時 etcd 也要一起備份。
 

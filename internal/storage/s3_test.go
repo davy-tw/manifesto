@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +77,15 @@ func TestS3(t *testing.T) {
 	}
 	if !strings.Contains(u, "X-Amz-Signature=") || !strings.Contains(u, "/media/"+key) {
 		t.Errorf("not a presigned path-style URL: %s", u)
+	}
+	// gofakes3 does not check signatures, so check what the uploader must
+	// send: exactly the Content-Type, nothing else.
+	parsed, err := url.Parse(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parsed.Query().Get("X-Amz-SignedHeaders"); got != "content-type;host" {
+		t.Errorf("signed headers = %q, want only content-type and host", got)
 	}
 	if code := put(t, u, "image/svg+xml", body); code != http.StatusOK {
 		t.Fatalf("PUT = %d", code)
