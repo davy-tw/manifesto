@@ -67,8 +67,10 @@ press 會在 Gazette 的 namespace 建立 `manifesto-<gazette>` 的 ListenerSet�
 ## 開發
 
 ```sh
-make test   # 單元測試 + envtest（包含 press 與 herald 的端到端測試）
+make test           # 單元測試 + envtest（包含 press 與 herald 的端到端測試）
 make lint
+make test-e2e       # 在 Kind 上部署並跑 E2E（需要 docker 與 kind）
+make test-e2e-k3d   # 在 k3d（k3s + Traefik）上跑 E2E，並驗證 gateway 路由模式（需要 docker 與 k3d）
 ```
 
 ## License

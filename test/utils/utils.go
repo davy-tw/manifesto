@@ -123,6 +123,38 @@ func IsCertManagerCRDsInstalled() bool {
 	return false
 }
 
+// Cluster providers the e2e suite can run on.
+const (
+	ProviderKind = "kind"
+	ProviderK3d  = "k3d"
+)
+
+// Provider returns the cluster provider the e2e suite runs on, from
+// E2E_PROVIDER: ProviderKind (default) or ProviderK3d.
+func Provider() string {
+	if os.Getenv("E2E_PROVIDER") == ProviderK3d {
+		return ProviderK3d
+	}
+	return ProviderKind
+}
+
+// LoadImageToCluster loads a local docker image into the e2e cluster.
+func LoadImageToCluster(name string) error {
+	if Provider() != ProviderK3d {
+		return LoadImageToKindClusterWithName(name)
+	}
+	cluster := "k3s-default"
+	if v, ok := os.LookupEnv("K3D_CLUSTER"); ok {
+		cluster = v
+	}
+	k3d := ProviderK3d
+	if v, ok := os.LookupEnv("K3D"); ok {
+		k3d = v
+	}
+	_, err := Run(exec.Command(k3d, "image", "import", name, "--cluster", cluster))
+	return err
+}
+
 // LoadImageToKindClusterWithName loads a local docker image to the kind cluster
 func LoadImageToKindClusterWithName(name string) error {
 	cluster := defaultKindCluster

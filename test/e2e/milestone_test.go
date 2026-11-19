@@ -105,6 +105,10 @@ spec:
 		_, index := heraldGet(Default, "/")
 		Expect(index).To(ContainSubstring(`href="/posts/` + dispatchName + `"`))
 
+		if utils.Provider() == utils.ProviderK3d {
+			expectServedThroughTraefik()
+		}
+
 		By("retracting it")
 		_, err = utils.Run(exec.Command("kubectl", "patch", "dispatch", dispatchName, "-n", blogNamespace,
 			"--type=merge", "-p", `{"spec":{"state":"Retracted"}}`))
@@ -178,11 +182,15 @@ func dispatchField(g Gomega, jsonpath string) string {
 // heraldGet fetches path from herald as a visitor of blogDomain and returns
 // the HTTP status code and body.
 func heraldGet(g Gomega, path string) (code, body string) {
-	url := fmt.Sprintf("http://%s.%s.svc.cluster.local%s", heraldService, namespace, path)
+	return curlFrom(g, fmt.Sprintf("http://%s.%s.svc.cluster.local%s", heraldService, namespace, path))
+}
+
+// curlFrom fetches url from inside the cluster as a visitor of blogDomain.
+func curlFrom(g Gomega, url string) (code, body string) {
 	const sep = "\n--status--"
 	out, err := utils.Run(exec.Command("kubectl", "exec", heraldCurlPod, "-n", namespace, "--",
 		"curl", "-s", "-H", "Host: "+blogDomain, "-w", sep+"%{http_code}", url))
-	g.ExpectWithOffset(1, err).NotTo(HaveOccurred(), "curl to herald failed")
+	g.ExpectWithOffset(1, err).NotTo(HaveOccurred(), "curl from inside the cluster failed")
 	i := strings.LastIndex(out, sep)
 	g.ExpectWithOffset(1, i).To(BeNumerically(">=", 0), "unexpected curl output: %s", out)
 	return strings.TrimSpace(out[i+len(sep):]), out[:i]

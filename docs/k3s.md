@@ -146,6 +146,10 @@ curl -sI https://alice.blog.example.io/
 
 `Routed` 是 False 時，message 會帶 Traefik 回報的原因。常見的原因是 Gateway listener 不允許該 namespace，或 hostname 對不上。
 
+## CI 上的對應測試
+
+`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 3 步與第 5 步設定（只用 HTTP listener，不測 TLS），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 讀得到文章。設定檔在 `test/e2e/k3d/`。
+
 ## 之後的里程碑要注意的地方
 
 - **M3 媒體**：k3s 預設的 `local-path` StorageClass 只支援 RWO，darkroom 用 PVC driver 時只能跑一個副本
