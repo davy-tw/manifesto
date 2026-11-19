@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: darkroom
+  namespace: system
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: darkroom
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      app.kubernetes.io/component: darkroom
+  # A ReadWriteOnce volume can only be mounted by one pod: run one replica
+  # and replace it instead of rolling.
+  replicas: 1
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: manifesto
+        app.kubernetes.io/component: darkroom
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - command:
+        - /manager
+        args:
+        - --data-dir=/data
+        - --keys-dir=/etc/darkroom/keys
+        - --public-address=:8080
+        - --internal-address=:8081
+        image: darkroom:latest
+        name: darkroom
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        - containerPort: 8081
+          name: internal
+          protocol: TCP
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: keys
+          mountPath: /etc/darkroom/keys
+          readOnly: true
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: media-data
+      - name: keys
+        secret:
+          # Created by press on its first start (--darkroom-secret).
+          secretName: manifesto-darkroom-keys
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 10

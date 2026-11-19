@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: darkroom
+    app.kubernetes.io/managed-by: kustomize
+  name: darkroom
+  namespace: system
+spec:
+  selector:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: darkroom
+  ports:
+  # Files and uploads: expose this through your Gateway at the Archive's publicURL.
+  - name: http
+    port: 80
+    targetPort: http
+  # press only: existence checks and deletions.
+  - name: internal
+    port: 8081
+    targetPort: internal

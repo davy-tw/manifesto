@@ -1,0 +1,26 @@
+# Anyone may read files and upload with a signed URL; only press may reach
+# the internal port that checks and deletes files.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: darkroom
+    app.kubernetes.io/managed-by: kustomize
+  name: darkroom
+  namespace: system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      app.kubernetes.io/component: darkroom
+  policyTypes: [Ingress]
+  ingress:
+  - ports:
+    - port: http
+  - from:
+    - podSelector:
+        matchLabels:
+          control-plane: controller-manager
+    ports:
+    - port: internal

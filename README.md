@@ -2,12 +2,13 @@
 
 Manifesto 是完全 Kubernetes 原生的部落格引擎：文章、分類、主題和媒體都是 CRD，系統邏輯由 operator 處理，權限交給 K8s RBAC。設計見 [`docs/design.md`](docs/design.md)。
 
-目前進度：**M2（內容與網站）**完成。文章、分類（Section）、標籤（Stamp）、作者（Scribe）與主題（Typeset / ClusterTypeset）都是 CRD；herald 提供分頁列表、篩選頁、Wire（RSS）與 sitemap；press 可以替每個網域建立 Gateway API 路由與 cert-manager 憑證。
+目前進度：**M3（媒體）**的 PVC 後端完成，S3 後端待做。文章、分類（Section）、標籤（Stamp）、作者（Scribe）與主題（Typeset / ClusterTypeset）都是 CRD；herald 提供分頁列表、篩選頁、Wire（RSS）與 sitemap；press 可以替每個網域建立 Gateway API 路由與 cert-manager 憑證。
 
 | 元件 | 位置 | 職責 |
 |---|---|---|
 | press | `cmd/press` | operator：決定 Dispatch 的 phase、排程發布、檢查引用、試渲染 |
 | herald | `cmd/herald` | 訪客端網站：唯讀監看資源，在記憶體中預先渲染，依 Host 提供頁面 |
+| darkroom | `cmd/darkroom` | 媒體檔案：驗證簽章上傳、以內容雜湊存放與對外提供；不碰 K8s API |
 
 ## 本機試用
 
@@ -36,10 +37,29 @@ curl -H 'Host: alice.localtest.me' http://localhost:8080/posts/hello-k8s
 ```sh
 make docker-build docker-push IMG=<registry>/manifesto-press:<tag>
 make docker-build docker-push COMPONENT=herald IMG=<registry>/manifesto-herald:<tag>
-make deploy IMG=<registry>/manifesto-press:<tag> HERALD_IMG=<registry>/manifesto-herald:<tag>
+make docker-build docker-push COMPONENT=darkroom IMG=<registry>/manifesto-darkroom:<tag>
+make deploy IMG=<registry>/manifesto-press:<tag> HERALD_IMG=<registry>/manifesto-herald:<tag> \
+  DARKROOM_IMG=<registry>/manifesto-darkroom:<tag>
 ```
 
 herald 的 Service 是 `manifesto-system/manifesto-herald`。
+
+### 媒體（Print）
+
+darkroom 把檔案存在 PVC `manifesto-system/manifesto-media-data`（叢集預設的 StorageClass，k3s 上是 `local-path`），因為 PVC 是 RWO，只跑一個副本。
+
+1. 讓訪客連得到 darkroom 的 Service `manifesto-system/manifesto-darkroom`（port 80），例如用 HTTPRoute 掛到 `media.example.io`
+2. 建立 ClusterArchive，`publicURL` 填上一步的網址（見 `config/samples/manifesto_v1alpha1_clusterarchive.yaml`）
+3. 建立 Print（`size`、`sha256` 必須和檔案一致），等 press 寫入 `status.uploadURL` 後上傳：
+
+```sh
+curl -T docs/assets/hello-cover.svg "$(kubectl get media hello-cover -n blog-alice -o jsonpath='{.status.uploadURL}')"
+kubectl get media -n blog-alice   # Phase 變成 Ready
+```
+
+內容用 `![封面](print:hello-cover)` 引用，主題用 `{{ printurl "hello-cover" }}`、`.Dispatch.Cover`、`.Gazette.Logo`。上傳網址 5 分鐘內有效（`--upload-ttl`），逾時 Print 變成 `Failed`，刪掉重建即可。同 namespace 內容相同的檔案只存一份，最後一個引用的 Print 刪除時才刪檔。
+
+press 第一次啟動會在 `manifesto-system` 建立簽章用的 Secret `manifesto-darkroom-keys`；要換 key 時，把舊 key 改名（例如 `previous`）並放入新的 `current`，darkroom 會同時接受兩者。
 
 ### 路由與 TLS
 

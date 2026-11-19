@@ -187,9 +187,14 @@ func heraldGet(g Gomega, path string) (code, body string) {
 
 // curlFrom fetches url from inside the cluster as a visitor of blogDomain.
 func curlFrom(g Gomega, url string) (code, body string) {
+	return curlFromHost(g, blogDomain, url)
+}
+
+// curlFromHost fetches url from inside the cluster with the given Host header.
+func curlFromHost(g Gomega, host, url string) (code, body string) {
 	const sep = "\n--status--"
 	out, err := utils.Run(exec.Command("kubectl", "exec", heraldCurlPod, "-n", namespace, "--",
-		"curl", "-s", "-H", "Host: "+blogDomain, "-w", sep+"%{http_code}", url))
+		"curl", "-s", "-H", "Host: "+host, "-w", sep+"%{http_code}", url))
 	g.ExpectWithOffset(1, err).NotTo(HaveOccurred(), "curl from inside the cluster failed")
 	i := strings.LastIndex(out, sep)
 	g.ExpectWithOffset(1, i).To(BeNumerically(">=", 0), "unexpected curl output: %s", out)

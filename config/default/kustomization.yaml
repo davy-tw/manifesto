@@ -21,6 +21,8 @@ resources:
 # herald, the visitor site. Expose its Service through your Gateway; press
 # will create HTTPRoutes for each Gazette from M2.
 - ../herald
+# darkroom, the media store for pvc Archives.
+- ../darkroom
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
 # crd/kustomization.yaml
 #- ../webhook
