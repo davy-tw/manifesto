@@ -1,0 +1,101 @@
+name: Release
+
+# A v* tag publishes a release:
+# - the images ghcr.io/<owner>/manifesto-{press,herald,darkroom,desk}:<tag>
+#   for linux/amd64 and linux/arm64
+# - the Helm chart oci://ghcr.io/<owner>/charts/manifesto, version <tag>
+#   without the v, its images defaulting to that tag
+# - mfctl for Linux, macOS and Windows on the GitHub release (GoReleaser)
+# New packages on ghcr.io start private: make them public once in the
+# repository's package settings so clusters can pull them.
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  images:
+    name: Image ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        component: [press, herald, darkroom, desk]
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      - name: Build and push
+        env:
+          COMPONENT: ${{ matrix.component }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          make docker-buildx COMPONENT="$COMPONENT" IMG="ghcr.io/$owner/manifesto-$COMPONENT:$TAG" \
+            BUILDX_OUTPUT=--push \
+            BUILDX_FLAGS="--label org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY --label org.opencontainers.image.version=$TAG"
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: .go-version
+
+      - name: Package and push
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          make helm chart-lint
+          bin/helm package charts/manifesto --version "${TAG#v}" --app-version "$TAG" -d bin/chart
+          echo "$TOKEN" | bin/helm registry login ghcr.io -u "$ACTOR" --password-stdin
+          bin/helm push "bin/chart/manifesto-${TAG#v}.tgz" "oci://ghcr.io/$owner/charts"
+
+  mfctl:
+    name: mfctl
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: .go-version
+
+      - name: Release with GoReleaser
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          export OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          make goreleaser
+          bin/goreleaser release --clean

@@ -4,8 +4,10 @@
 # all namespaces, and people are granted the cluster roles
 # manifesto-proofreader, manifesto-editor and manifesto-publisher by name.
 
-# imageRegistry is prepended to every image repository, e.g. ghcr.io/me.
-imageRegistry: ""
+# imageRegistry is prepended to every image repository: the released images
+# are ghcr.io/davy-tw/manifesto-<component>. Set it to "" for images
+# imported into the nodes (docs/k3s.md) or to your own registry.
+imageRegistry: ghcr.io/davy-tw
 imagePullSecrets: []
 
 # press: the operator.

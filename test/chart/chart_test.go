@@ -208,7 +208,7 @@ func TestChartValues(t *testing.T) {
 			t.Errorf("image = %s", img)
 		}
 		h := convert[appsv1.Deployment](t, objs["Deployment/"+ns+"/manifesto-herald"])
-		if img := h.Spec.Template.Spec.Containers[0].Image; img != "ghcr.io/me/manifesto-herald:0.1.0" {
+		if img := h.Spec.Template.Spec.Containers[0].Image; img != "ghcr.io/me/manifesto-herald:v0.1.0" {
 			t.Errorf("herald image = %s, want the appVersion tag", img)
 		}
 	})

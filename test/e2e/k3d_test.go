@@ -76,7 +76,8 @@ func setupTraefikGateway() {
 func installWithHelm() {
 	_, err := utils.Run(exec.Command("make", "helm"))
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	set := append([]string{"desk.publicURL=http://desk.e2e.test"}, helmRoutingValues...)
+	// The images under test are loaded into the nodes, not pulled from ghcr.io.
+	set := append([]string{"desk.publicURL=http://desk.e2e.test", "imageRegistry="}, helmRoutingValues...)
 	for component, image := range map[string]string{
 		"press": managerImage, "herald": heraldImage, "darkroom": darkroomImage, "desk": deskImage,
 	} {

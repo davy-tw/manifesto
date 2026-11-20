@@ -1,0 +1,47 @@
+# GoReleaser publishes mfctl to the GitHub release of a v* tag
+# (.github/workflows/release.yml). The images and the Helm chart are pushed
+# to ghcr.io by the same workflow.
+version: 2
+project_name: manifesto
+# Outside dist/, which make build-installer uses.
+dist: bin/release
+
+builds:
+  - id: mfctl
+    main: ./cmd/mfctl
+    binary: mfctl
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X go.pkgs.davy.tw/manifesto/internal/mfctl.Version={{ .Tag }}
+
+archives:
+  - id: mfctl
+    ids: [mfctl]
+    name_template: "mfctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+
+release:
+  footer: |
+    ## Install
+
+    ```sh
+    kubectl create namespace manifesto-system
+    helm install manifesto oci://ghcr.io/{{ .Env.OWNER }}/charts/manifesto --version {{ .Version }} \
+      -n manifesto-system --set desk.publicURL=https://desk.example.io
+    ```
+
+    Images: `ghcr.io/{{ .Env.OWNER }}/manifesto-{press,herald,darkroom,desk}:{{ .Tag }}` (linux/amd64, linux/arm64).
+    mfctl: download the archive for your platform below.

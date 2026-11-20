@@ -191,22 +191,19 @@ docker-build: ## Build docker image for COMPONENT (press, herald, darkroom or de
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
-# PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
-# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
-# - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
-# - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
-# - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
-# To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+# PLATFORMS are the platforms docker-buildx builds COMPONENT for. The
+# Dockerfile cross-compiles on the build machine, so no emulation is needed.
+# BUILDX_OUTPUT=--push pushes the image (the release does); the default only
+# builds it, to check that every platform compiles.
+PLATFORMS ?= linux/amd64,linux/arm64
+BUILDX_OUTPUT ?=
+# BUILDX_FLAGS are extra buildx flags, e.g. --label for the image source.
+BUILDX_FLAGS ?=
 .PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+docker-buildx: ## Build COMPONENT's image for PLATFORMS (BUILDX_OUTPUT=--push to push it as IMG).
 	- $(CONTAINER_TOOL) buildx create --name manifesto-builder
-	$(CONTAINER_TOOL) buildx use manifesto-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm manifesto-builder
-	rm Dockerfile.cross
+	$(CONTAINER_TOOL) buildx build --builder manifesto-builder $(BUILDX_OUTPUT) $(BUILDX_FLAGS) --platform=$(PLATFORMS) \
+		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) --build-arg COMPONENT=$(COMPONENT) --tag ${IMG} .
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
@@ -258,6 +255,7 @@ KIND ?= kind
 K3D ?= k3d
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 HELM ?= $(LOCALBIN)/helm
+GORELEASER ?= $(LOCALBIN)/goreleaser
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
@@ -265,6 +263,7 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
 HELM_VERSION ?= v4.3.1
+GORELEASER_VERSION ?= v2.20.0
 CONTROLLER_TOOLS_VERSION ?= v0.22.0
 
 #ENVTEST_VERSION is the controller-runtime version to use for setup-envtest, derived from go.mod
@@ -287,6 +286,11 @@ $(KUSTOMIZE): $(LOCALBIN)
 helm: $(HELM) ## Download helm locally if necessary.
 $(HELM): $(LOCALBIN)
 	$(call go-install-tool,$(HELM),helm.sh/helm/v4/cmd/helm,$(HELM_VERSION))
+
+.PHONY: goreleaser
+goreleaser: $(GORELEASER) ## Download goreleaser locally if necessary.
+$(GORELEASER): $(LOCALBIN)
+	$(call go-install-tool,$(GORELEASER),github.com/goreleaser/goreleaser/v2,$(GORELEASER_VERSION))
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
