@@ -186,7 +186,7 @@ mfctl edition restore hello-k8s 3 -n blog-alice   # 把第 3 版的內容放回�
 
 - 把四個元件的 image 推到 `ghcr.io/davy-tw/manifesto-<元件>:<tag>`（linux/amd64、linux/arm64）
 - 把 chart 推成 OCI artifact `oci://ghcr.io/davy-tw/charts/manifesto`，版本是 tag 去掉 `v`，image 預設用同一個 tag
-- 用 GoReleaser 把 Linux、macOS、Windows 的 mfctl 放到 GitHub Release
+- 用 GoReleaser 把 Linux、macOS、Windows、FreeBSD 的 mfctl（amd64、arm64）放到 GitHub Release
 
 ghcr.io 上新建的 package 預設是私有的：第一次發布後，到 GitHub 的 package 設定把五個 package（四個 image 與 `charts/manifesto`）改成公開，叢集才拉得到。改到 Dockerfile、chart 或發布設定時，`release-check.yml` 會先完整跑一次但不發布。
 

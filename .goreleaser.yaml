@@ -11,7 +11,7 @@ builds:
     main: ./cmd/mfctl
     binary: mfctl
     env: [CGO_ENABLED=0]
-    goos: [linux, darwin, windows]
+    goos: [linux, darwin, windows, freebsd]
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags:

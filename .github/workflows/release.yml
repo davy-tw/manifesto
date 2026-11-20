@@ -5,7 +5,7 @@ name: Release
 #   for linux/amd64 and linux/arm64
 # - the Helm chart oci://ghcr.io/<owner>/charts/manifesto, version <tag>
 #   without the v, its images defaulting to that tag
-# - mfctl for Linux, macOS and Windows on the GitHub release (GoReleaser)
+# - mfctl for Linux, macOS, Windows and FreeBSD on the GitHub release (GoReleaser)
 # New packages on ghcr.io start private: make them public once in the
 # repository's package settings so clusters can pull them.
 on:
