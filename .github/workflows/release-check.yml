@@ -1,13 +1,14 @@
 name: Release check
 
 # Runs what the release does, without publishing, whenever what it depends
-# on changes: every image for both platforms, the packaged chart and the
+# on changes (the Makefile installs the release tools and builds the images): every image for both platforms, the packaged chart and the
 # mfctl archives.
 on:
   push:
     paths:
       - .github/workflows/release*.yml
       - .goreleaser.yaml
+      - Makefile
       - Dockerfile
       - .dockerignore
       - charts/**
@@ -16,6 +17,7 @@ on:
     paths:
       - .github/workflows/release*.yml
       - .goreleaser.yaml
+      - Makefile
       - Dockerfile
       - .dockerignore
       - charts/**
