@@ -38,18 +38,21 @@ curl -H 'Host: alice.localtest.me' http://localhost:8080/posts/hello-k8s
 
 ### Helm
 
+發布版的 chart 與 image 在 ghcr.io（版本見 GitHub Releases）：
+
 ```sh
 kubectl create namespace manifesto-system
-helm install manifesto charts/manifesto -n manifesto-system \
-  --set imageRegistry=<registry> \
+helm install manifesto oci://ghcr.io/davy-tw/charts/manifesto --version <X.Y.Z> -n manifesto-system \
   --set desk.publicURL=https://desk.example.io
 ```
+
+從原始碼安裝自己 build 的 image：`helm install manifesto charts/manifesto … --set imageRegistry=<registry>`（image 匯入節點時設 `imageRegistry=`，見 `docs/k3s.md`）。
 
 常用的值（完整說明見 `charts/manifesto/values.yaml`）：
 
 | 值 | 說明 |
 |---|---|
-| `imageRegistry`、`<元件>.image.repository/tag` | image 位置；tag 預設是 chart 的 appVersion |
+| `imageRegistry`、`<元件>.image.repository/tag` | image 位置，預設 `ghcr.io/davy-tw/manifesto-<元件>`；tag 預設是 chart 的 appVersion |
 | `press.routing.*` | Gateway 路由（`gatewayName`、`gatewayNamespace`、`mode`、`gatewaySection`、`clusterIssuer`） |
 | `press.editions`、`press.editionBytes` | 每篇保留的 Edition 數與內容總量上限（預設 20 版、2Mi），避免修訂版本塞滿 etcd |
 | `darkroom.enabled`、`darkroom.persistence.*` | 媒體（pvc Archive）與它的 PVC；全部用 S3 時可以關掉 |
@@ -176,6 +179,16 @@ mfctl edition list hello-k8s -n blog-alice
 mfctl edition show hello-k8s 3 -n blog-alice      # 印出第 3 版的內文
 mfctl edition restore hello-k8s 3 -n blog-alice   # 把第 3 版的內容放回文章（會成為新的一版）
 ```
+
+## 發布
+
+推一個 `v*` tag（例如 `git tag v0.1.0 && git push origin v0.1.0`），`.github/workflows/release.yml` 會：
+
+- 把四個元件的 image 推到 `ghcr.io/davy-tw/manifesto-<元件>:<tag>`（linux/amd64、linux/arm64）
+- 把 chart 推成 OCI artifact `oci://ghcr.io/davy-tw/charts/manifesto`，版本是 tag 去掉 `v`，image 預設用同一個 tag
+- 用 GoReleaser 把 Linux、macOS、Windows、FreeBSD 的 mfctl（amd64、arm64）放到 GitHub Release
+
+ghcr.io 上新建的 package 預設是私有的：第一次發布後，到 GitHub 的 package 設定把五個 package（四個 image 與 `charts/manifesto`）改成公開，叢集才拉得到。改到 Dockerfile、chart 或發布設定時，`release-check.yml` 會先完整跑一次但不發布。
 
 ## 開發
 

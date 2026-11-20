@@ -357,6 +357,7 @@ status:
 - chart 的 CRD 與 RBAC 不手寫：`make chart` 從 kustomize 的輸出產生 `charts/manifesto/files/`，CI 檢查有沒有過期；`test/chart` 比對兩者的物件、CRD、RBAC 與 Pod 設定
 - CRD 放在 templates（不是 `crds/`），升級時才會更新；CRD 和媒體 PVC 加上 `helm.sh/resource-policy: keep`
 - k3d 的 E2E 用 Helm 安裝（gateway 模式），Kind 的 E2E 用 kustomize
+- 發布：`v*` tag 把 image（linux/amd64、linux/arm64）與 chart（OCI）推到 ghcr.io，GoReleaser 把 mfctl（Linux、macOS、Windows、FreeBSD，amd64 與 arm64）放到 GitHub Release；chart 的 image 預設是 `ghcr.io/davy-tw/manifesto-<元件>`，tag 是 chart 的 appVersion
 
 ## desk（管理介面）
 

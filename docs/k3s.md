@@ -110,7 +110,31 @@ HTTP 轉 HTTPS 建議在 Traefik 的 `web` entrypoint 設定轉址。Helm chart 
 
 ## 5. 部署 Manifesto 並啟用路由
 
-k3s 用 containerd。沒有 registry 時，可以把 image 直接匯入節點：
+用發布到 ghcr.io 的 Helm chart 安裝，打開 gateway 路由模式：
+
+```yaml
+# values-k3s.yaml
+press:
+  routing:
+    mode: gateway
+    gatewayName: manifesto
+    gatewayNamespace: kube-system
+    gatewaySection: websecure
+desk:
+  publicURL: https://desk.blog.example.io
+  tokenSignIn: true        # 還沒有 OIDC 時（見第 8 步）
+```
+
+```sh
+kubectl create namespace manifesto-system
+helm install manifesto oci://ghcr.io/davy-tw/charts/manifesto --version <X.Y.Z> \
+  -n manifesto-system -f values-k3s.yaml --wait
+```
+
+`<X.Y.Z>` 是 GitHub Releases 上的版本，image 會用同一版（`ghcr.io/davy-tw/manifesto-*:v<X.Y.Z>`）。
+
+<details>
+<summary>用自己 build 的 image（沒有 registry 時匯入節點）</summary>
 
 ```sh
 make docker-build IMG=manifesto-press:dev
@@ -118,32 +142,13 @@ make docker-build COMPONENT=herald IMG=manifesto-herald:dev
 make docker-build COMPONENT=darkroom IMG=manifesto-darkroom:dev
 make docker-build COMPONENT=desk IMG=manifesto-desk:dev
 docker save manifesto-press:dev manifesto-herald:dev manifesto-darkroom:dev manifesto-desk:dev | sudo k3s ctr images import -
+make helm
+bin/helm install manifesto charts/manifesto -n manifesto-system -f values-k3s.yaml --wait \
+  --set imageRegistry= --set press.image.tag=dev --set herald.image.tag=dev \
+  --set darkroom.image.tag=dev --set desk.image.tag=dev
 ```
 
-用 Helm chart 安裝，打開 gateway 路由模式：
-
-```yaml
-# values-k3s.yaml
-press:
-  image: {tag: dev}
-  routing:
-    mode: gateway
-    gatewayName: manifesto
-    gatewayNamespace: kube-system
-    gatewaySection: websecure
-herald: {image: {tag: dev}}
-darkroom: {image: {tag: dev}}
-desk:
-  image: {tag: dev}
-  publicURL: https://desk.blog.example.io
-  tokenSignIn: true        # 還沒有 OIDC 時（見第 8 步）
-```
-
-```sh
-kubectl create namespace manifesto-system
-make helm   # 或用你自己的 helm
-bin/helm install manifesto charts/manifesto -n manifesto-system -f values-k3s.yaml --wait
-```
+</details>
 
 `gateway` 模式不會建立 Certificate，所以不用設定 `press.routing.clusterIssuer`。
 
