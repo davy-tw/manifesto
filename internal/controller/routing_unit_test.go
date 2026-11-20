@@ -18,8 +18,8 @@ import (
 
 func routingGazette() *v1.Gazette {
 	return &v1.Gazette{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "blog-alice", Name: "notes"},
-		Spec:       v1.GazetteSpec{Domain: "alice.example.io"},
+		Namespace: "blog-alice", Name: "notes",
+		Spec: v1.GazetteSpec{Domain: "alice.example.io"},
 	}
 }
 
@@ -80,12 +80,12 @@ func TestRoutedCondition(t *testing.T) {
 		}
 	}
 	route := func(parents ...gatewayv1.RouteParentStatus) *gatewayv1.HTTPRoute {
-		return &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: "manifesto-notes"},
+		return &gatewayv1.HTTPRoute{Name: "manifesto-notes",
 			Status: gatewayv1.HTTPRouteStatus{RouteStatus: gatewayv1.RouteStatus{Parents: parents}}}
 	}
-	programmed := &gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Name: "manifesto-notes"},
+	programmed := &gatewayv1.ListenerSet{Name: "manifesto-notes",
 		Status: gatewayv1.ListenerSetStatus{Conditions: []metav1.Condition{{Type: "Programmed", Status: metav1.ConditionTrue}}}}
-	pending := &gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Name: "manifesto-notes"}}
+	pending := &gatewayv1.ListenerSet{Name: "manifesto-notes"}
 
 	tests := []struct {
 		name   string

@@ -17,8 +17,8 @@ import (
 
 func gazette(ns, name, dom string, created time.Time) v1.Gazette {
 	return v1.Gazette{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, CreationTimestamp: metav1.NewTime(created)},
-		Spec:       v1.GazetteSpec{Domain: dom},
+		Namespace: ns, Name: name, CreationTimestamp: metav1.NewTime(created),
+		Spec: v1.GazetteSpec{Domain: dom},
 	}
 }
 

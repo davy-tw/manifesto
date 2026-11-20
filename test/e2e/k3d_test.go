@@ -22,7 +22,7 @@ import (
 // On k3d the suite reproduces docs/k3s.md: Gateway API CRDs, Traefik's
 // Gateway provider and a shared Gateway, then runs press in gateway mode.
 const (
-	gatewayAPIInstall = "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.3/standard-install.yaml"
+	gatewayAPIInstall = "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.7.0/standard-install.yaml"
 	traefikService    = "traefik.kube-system.svc.cluster.local"
 )
 

@@ -11,7 +11,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -46,11 +45,9 @@ func EnsureKey(ctx context.Context, c client.Client, secret types.NamespacedName
 			return nil, kerr
 		}
 		s = corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: secret.Namespace, Name: secret.Name,
-				Labels: map[string]string{labelManagedBy: v1.FieldManagerPress},
-			},
-			Data: map[string][]byte{dataKey: key},
+			Namespace: secret.Namespace, Name: secret.Name,
+			Labels: map[string]string{labelManagedBy: v1.FieldManagerPress},
+			Data:   map[string][]byte{dataKey: key},
 		}
 		err = c.Create(ctx, &s)
 		if apierrors.IsAlreadyExists(err) {

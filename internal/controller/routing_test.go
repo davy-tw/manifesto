@@ -30,10 +30,10 @@ var _ = Describe("Gazette routing", func() {
 		return string(c.Status) + "/" + c.Reason
 	}
 	listenerSet := func(ns, gazette string) *gatewayv1.ListenerSet {
-		return &gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "manifesto-" + gazette}}
+		return &gatewayv1.ListenerSet{Namespace: ns, Name: "manifesto-" + gazette}
 	}
 	grantFor := func(ns string) *gatewayv1.ReferenceGrant {
-		return &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: testRouting.Herald.Namespace, Name: "manifesto-" + ns}}
+		return &gatewayv1.ReferenceGrant{Namespace: testRouting.Herald.Namespace, Name: "manifesto-" + ns}
 	}
 	exists := func(obj client.Object) func() error {
 		return func() error { return k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj) }
@@ -59,14 +59,14 @@ var _ = Describe("Gazette routing", func() {
 		Expect(ls.OwnerReferences).To(ConsistOf(HaveField("UID", g.UID)))
 
 		By("routing HTTPS to herald and redirecting HTTP")
-		route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "manifesto-notes"}}
+		route := &gatewayv1.HTTPRoute{Namespace: ns, Name: "manifesto-notes"}
 		Eventually(exists(route), timeout, interval).Should(Succeed())
 		Expect(route.Spec.Hostnames).To(ConsistOf(gatewayv1.Hostname(dom)))
 		Expect(string(*route.Spec.ParentRefs[0].SectionName)).To(Equal("https"))
 		backend := route.Spec.Rules[0].BackendRefs[0]
 		Expect(string(backend.Name)).To(Equal("manifesto-herald"))
 		Expect(string(*backend.Namespace)).To(Equal("manifesto-system"))
-		redirect := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "manifesto-notes-redirect"}}
+		redirect := &gatewayv1.HTTPRoute{Namespace: ns, Name: "manifesto-notes-redirect"}
 		Eventually(exists(redirect), timeout, interval).Should(Succeed())
 		Expect(*redirect.Spec.Rules[0].Filters[0].RequestRedirect.Scheme).To(Equal("https"))
 

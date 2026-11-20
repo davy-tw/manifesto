@@ -1,6 +1,6 @@
 # Build one Manifesto component (press, herald, darkroom or desk) as /manager
-# Override BASE_IMAGE to build from another registry, e.g. docker.io/library/golang:1.26
-ARG BASE_IMAGE=golang:1.26
+# Override BASE_IMAGE to build from another registry, e.g. docker.io/library/golang:1.27
+ARG BASE_IMAGE=golang:1.27
 # The builder runs on the build machine's platform and cross-compiles for the
 # target, so multi-platform images (make docker-buildx, the release) need no
 # emulation.

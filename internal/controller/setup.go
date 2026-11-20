@@ -9,7 +9,6 @@ package controller
 import (
 	"context"
 
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -169,7 +168,7 @@ func typesetObjectKey(o client.Object) string {
 func requestsFor[T client.Object](items []T) []reconcile.Request {
 	reqs := make([]reconcile.Request, 0, len(items))
 	for _, o := range items {
-		reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: o.GetNamespace(), Name: o.GetName()}})
+		reqs = append(reqs, reconcile.Request{Namespace: o.GetNamespace(), Name: o.GetName()})
 	}
 	return reqs
 }

@@ -17,7 +17,6 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -73,7 +72,7 @@ func TestMain(m *testing.M) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { _ = mgr.Start(ctx) }()
-	if err := c.Create(ctx, &v1.ClusterArchive{ObjectMeta: metav1.ObjectMeta{Name: "local"},
+	if err := c.Create(ctx, &v1.ClusterArchive{Name: "local",
 		Spec: v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "media", PublicURL: media.URL}}}); err != nil {
 		panic(err)
 	}
@@ -103,7 +102,7 @@ func run(t *testing.T, ns string, args ...string) (string, error) {
 
 func namespace(t *testing.T, name string) string {
 	t.Helper()
-	if err := c.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}); err != nil {
+	if err := c.Create(context.Background(), &corev1.Namespace{Name: name}); err != nil {
 		t.Fatal(err)
 	}
 	return name
@@ -161,7 +160,7 @@ func TestUpload(t *testing.T) {
 func TestEditions(t *testing.T) {
 	ctx := context.Background()
 	ns := namespace(t, "editions")
-	d := &v1.Dispatch{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "story"},
+	d := &v1.Dispatch{Namespace: ns, Name: "story",
 		Spec: v1.DispatchSpec{GazetteRef: "notes", Title: "First", Content: v1.DispatchContent{Body: "one"}}}
 	if err := c.Create(ctx, d); err != nil {
 		t.Fatal(err)

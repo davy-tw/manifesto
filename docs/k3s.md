@@ -21,10 +21,10 @@ kubectl get crd httproutes.gateway.networking.k8s.io      -o jsonpath='{.spec.ve
 kubectl get crd referencegrants.gateway.networking.k8s.io -o jsonpath='{.spec.versions[*].name}{"\n"}'
 ```
 
-如果沒有 Gateway API 的 CRD，或 ReferenceGrant 沒有提供 `v1`，請安裝 Gateway API 的 standard CRD（press 用 v1.6.3 開發）：
+如果沒有 Gateway API 的 CRD，或 ReferenceGrant 沒有提供 `v1`，請安裝 Gateway API 的 standard CRD（press 用 v1.7.0 開發）：
 
 ```sh
-kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.3/standard-install.yaml
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.7.0/standard-install.yaml
 ```
 
 ## 2. 啟用 Traefik 的 Gateway API provider

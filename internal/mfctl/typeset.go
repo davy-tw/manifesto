@@ -119,13 +119,13 @@ func BuildTypeset(dir, name, namespace string, cluster bool, params []string) (a
 	meta := metav1.ObjectMeta{Name: name}
 	if cluster {
 		return &v1.ClusterTypeset{
-			TypeMeta:   metav1.TypeMeta{APIVersion: v1.GroupVersion.String(), Kind: "ClusterTypeset"},
+			APIVersion: v1.GroupVersion.String(), Kind: "ClusterTypeset",
 			ObjectMeta: meta, Spec: spec,
 		}, nil
 	}
 	meta.Namespace = namespace
 	return &v1.Typeset{
-		TypeMeta:   metav1.TypeMeta{APIVersion: v1.GroupVersion.String(), Kind: "Typeset"},
+		APIVersion: v1.GroupVersion.String(), Kind: "Typeset",
 		ObjectMeta: meta, Spec: spec,
 	}, nil
 }

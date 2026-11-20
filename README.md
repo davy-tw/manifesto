@@ -12,7 +12,7 @@ Manifesto 是完全 Kubernetes 原生的部落格引擎：文章、分類、主�
 
 ## 本機試用
 
-需要 Go 1.26 和一個 Kubernetes 叢集（kind 或 k3d 都可以）。
+需要 Go 1.27 和一個 Kubernetes 叢集（kind 或 k3d 都可以）。
 
 ```sh
 make install                  # 安裝 CRD

@@ -26,20 +26,20 @@ var nsCounter atomic.Int32
 // newNamespace creates a fresh namespace for one test.
 func newNamespace() string {
 	name := fmt.Sprintf("press-test-%d", nsCounter.Add(1))
-	Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})).To(Succeed())
+	Expect(k8sClient.Create(ctx, &corev1.Namespace{Name: name})).To(Succeed())
 	return name
 }
 
 func newGazette(ns, name, dom string) *v1.Gazette {
 	return &v1.Gazette{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
-		Spec:       v1.GazetteSpec{Title: "Test Gazette", Domain: dom},
+		Namespace: ns, Name: name,
+		Spec: v1.GazetteSpec{Title: "Test Gazette", Domain: dom},
 	}
 }
 
 func newDispatch(ns, name string, state v1.DispatchState) *v1.Dispatch {
 	return &v1.Dispatch{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: v1.DispatchSpec{
 			GazetteRef: "notes",
 			Title:      "Hello",

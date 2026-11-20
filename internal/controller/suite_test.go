@@ -18,7 +18,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -114,7 +113,7 @@ var _ = BeforeSuite(func() {
 		Metrics: metricsserver.Options{BindAddress: "0"},
 	})
 	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testRouting.Herald.Namespace}})).To(Succeed())
+	Expect(k8sClient.Create(ctx, &corev1.Namespace{Name: testRouting.Herald.Namespace})).To(Succeed())
 	By("starting an in-process darkroom")
 	darkroomStore = &darkroom.Store{Dir: GinkgoT().TempDir(), Keys: func() [][]byte { return [][]byte{testSigningKey} }, Log: logf.Log}
 	darkroomPublic = httptest.NewServer(darkroomStore.PublicHandler())

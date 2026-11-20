@@ -214,7 +214,7 @@ func TestSitemap(t *testing.T) {
 
 func clusterTypeset(name, rv, dispatchTemplate string) v1.ClusterTypeset {
 	return v1.ClusterTypeset{
-		ObjectMeta: metav1.ObjectMeta{Name: name, UID: "ts-uid", ResourceVersion: rv},
+		Name: name, UID: "ts-uid", ResourceVersion: rv,
 		Spec: v1.TypesetSpec{
 			Params: map[string]string{"color": "blue", "font": "serif"},
 			Source: v1.TypesetSource{Inline: &v1.InlineTypesetSource{Templates: map[string]string{
