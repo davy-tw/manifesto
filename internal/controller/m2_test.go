@@ -61,8 +61,8 @@ var _ = Describe("M2 references", func() {
 			WithTransform(dispatchCondition(v1.ConditionReady), Equal("False/"+v1.ReasonScribeNotFound)))
 
 		Expect(k8sClient.Create(ctx, &v1.Scribe{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "bob"},
-			Spec:       v1.ScribeSpec{DisplayName: "Bob"},
+			Namespace: ns, Name: "bob",
+			Spec: v1.ScribeSpec{DisplayName: "Bob"},
 		})).To(Succeed())
 		Eventually(fetch(d), timeout, interval).Should(
 			WithTransform(dispatchCondition(v1.ConditionReady), Equal("True/"+v1.ReasonResolved)))
@@ -70,13 +70,13 @@ var _ = Describe("M2 references", func() {
 
 	It("follows the Gazette's theme through errors and fixes", func() {
 		name := fmt.Sprintf("theme-%d", nsCounter.Add(1))
-		ts := &v1.ClusterTypeset{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: inlineTypeset(`{{ define "content" }}{{ .Dispatch.Title }`)}
+		ts := &v1.ClusterTypeset{Name: name, Spec: inlineTypeset(`{{ define "content" }}{{ .Dispatch.Title }`)}
 		Expect(k8sClient.Create(ctx, ts)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, ts) })
 		Eventually(fetch(ts), timeout, interval).Should(
 			WithTransform(func(t *v1.ClusterTypeset) string { return conditionOf(t.Status.Conditions) }, Equal("False/"+v1.ReasonTemplateError)))
 
-		g := &v1.Gazette{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "notes"}}
+		g := &v1.Gazette{Namespace: ns, Name: "notes"}
 		update(g, func(g *v1.Gazette) {
 			g.Spec.TypesetRef = &v1.TypesetRef{Kind: v1.KindClusterTypeset, Name: name}
 		})
@@ -112,7 +112,7 @@ var _ = Describe("M2 references", func() {
 	})
 
 	It("falls back to the built-in theme when the Typeset is missing", func() {
-		g := &v1.Gazette{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "notes"}}
+		g := &v1.Gazette{Namespace: ns, Name: "notes"}
 		update(g, func(g *v1.Gazette) {
 			g.Spec.TypesetRef = &v1.TypesetRef{Kind: v1.KindTypeset, Name: "nowhere"}
 		})
@@ -126,8 +126,8 @@ var _ = Describe("M2 references", func() {
 
 		By("creating the namespaced Typeset")
 		Expect(k8sClient.Create(ctx, &v1.Typeset{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "nowhere"},
-			Spec:       inlineTypeset(`{{ define "content" }}ok{{ end }}`),
+			Namespace: ns, Name: "nowhere",
+			Spec: inlineTypeset(`{{ define "content" }}ok{{ end }}`),
 		})).To(Succeed())
 		Eventually(fetch(g), timeout, interval).Should(
 			WithTransform(func(g *v1.Gazette) string { return conditionOf(g.Status.Conditions) }, Equal("True/"+v1.ReasonResolved)))
@@ -135,11 +135,11 @@ var _ = Describe("M2 references", func() {
 
 	It("checks Section parents", func() {
 		sectionReady := func(s *v1.Section) string { return conditionOf(s.Status.Conditions) }
-		child := &v1.Section{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "go"}, Spec: v1.SectionSpec{Parent: "tech"}}
+		child := &v1.Section{Namespace: ns, Name: "go", Spec: v1.SectionSpec{Parent: "tech"}}
 		Expect(k8sClient.Create(ctx, child)).To(Succeed())
 		Eventually(fetch(child), timeout, interval).Should(WithTransform(sectionReady, Equal("False/"+v1.ReasonParentNotFound)))
 
-		parent := &v1.Section{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "tech"}}
+		parent := &v1.Section{Namespace: ns, Name: "tech"}
 		Expect(k8sClient.Create(ctx, parent)).To(Succeed())
 		Eventually(fetch(child), timeout, interval).Should(WithTransform(sectionReady, Equal("True/"+v1.ReasonResolved)))
 

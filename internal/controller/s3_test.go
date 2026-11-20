@@ -15,15 +15,14 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 )
 
 func s3Credentials(ns, name string) *corev1.Secret {
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
-		Data:       map[string][]byte{"accessKeyID": []byte("test"), "secretAccessKey": []byte("test")},
+		Namespace: ns, Name: name,
+		Data: map[string][]byte{"accessKeyID": []byte("test"), "secretAccessKey": []byte("test")},
 	}
 }
 
@@ -52,7 +51,7 @@ var _ = Describe("S3 media", func() {
 	It("stores files in a bucket through a namespaced Archive", func() {
 		ns := newNamespace()
 		Expect(k8sClient.Create(ctx, s3Credentials(ns, "s3-creds"))).To(Succeed())
-		archive := &v1.Archive{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "bucket"}, Spec: v1.ArchiveSpec{S3: s3Source("s3-creds")}}
+		archive := &v1.Archive{Namespace: ns, Name: "bucket", Spec: v1.ArchiveSpec{S3: s3Source("s3-creds")}}
 		Expect(k8sClient.Create(ctx, archive)).To(Succeed())
 		Eventually(fetch(archive), timeout, interval).Should(
 			WithTransform(func(a *v1.Archive) string { return readyReason(a.Status.Conditions) }, Equal("True/"+v1.ReasonBackendReady)))
@@ -86,13 +85,13 @@ var _ = Describe("S3 media", func() {
 	It("reads a ClusterArchive's credentials from press's namespace by default", func() {
 		name := fmt.Sprintf("s3-%d", nsCounter.Add(1))
 		Expect(k8sClient.Create(ctx, s3Credentials(testRouting.Herald.Namespace, name))).To(Succeed())
-		ok := &v1.ClusterArchive{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1.ArchiveSpec{S3: s3Source(name)}}
+		ok := &v1.ClusterArchive{Name: name, Spec: v1.ArchiveSpec{S3: s3Source(name)}}
 		Expect(k8sClient.Create(ctx, ok)).To(Succeed())
 		Eventually(fetch(ok), timeout, interval).Should(
 			WithTransform(func(a *v1.ClusterArchive) string { return readyReason(a.Status.Conditions) }, Equal("True/"+v1.ReasonBackendReady)))
 
 		By("reporting missing credentials")
-		missing := &v1.ClusterArchive{ObjectMeta: metav1.ObjectMeta{Name: name + "-nocreds"}, Spec: v1.ArchiveSpec{S3: s3Source("nowhere")}}
+		missing := &v1.ClusterArchive{Name: name + "-nocreds", Spec: v1.ArchiveSpec{S3: s3Source("nowhere")}}
 		Expect(k8sClient.Create(ctx, missing)).To(Succeed())
 		Eventually(fetch(missing), timeout, interval).Should(
 			WithTransform(func(a *v1.ClusterArchive) string { return readyReason(a.Status.Conditions) }, Equal("False/"+v1.ReasonBackendError)))
@@ -101,7 +100,7 @@ var _ = Describe("S3 media", func() {
 		By("reporting a missing bucket")
 		src := s3Source(name)
 		src.Bucket = "no-such-bucket"
-		noBucket := &v1.ClusterArchive{ObjectMeta: metav1.ObjectMeta{Name: name + "-nobucket"}, Spec: v1.ArchiveSpec{S3: src}}
+		noBucket := &v1.ClusterArchive{Name: name + "-nobucket", Spec: v1.ArchiveSpec{S3: src}}
 		Expect(k8sClient.Create(ctx, noBucket)).To(Succeed())
 		Eventually(fetch(noBucket), timeout, interval).Should(
 			WithTransform(func(a *v1.ClusterArchive) string { return condition(a.Status.Conditions, v1.ConditionReady).Message },

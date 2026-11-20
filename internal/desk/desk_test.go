@@ -29,7 +29,6 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -136,15 +135,15 @@ func TestMain(m *testing.M) {
 func userToken(t *testing.T, name, role string) string {
 	t.Helper()
 	ctx := context.Background()
-	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	sa := &corev1.ServiceAccount{Namespace: ns, Name: name}
 	if err := admin.Create(ctx, sa); err != nil {
 		t.Fatal(err)
 	}
 	if role != "" {
 		if err := admin.Create(ctx, &rbacv1.RoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
-			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role},
-			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: name, Namespace: ns}},
+			Namespace: ns, Name: name,
+			RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role},
+			Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: name, Namespace: ns}},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -185,7 +184,7 @@ func installRoles(t *testing.T) {
 			{APIGroups: []string{v1.GroupName}, Resources: []string{"dispatches"}, Verbs: []string{"create", "update", "patch", "delete"}},
 		},
 	} {
-		if err := admin.Create(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "test-" + name}, Rules: rules}); err != nil {
+		if err := admin.Create(ctx, &rbacv1.ClusterRole{Name: "test-" + name, Rules: rules}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -193,14 +192,14 @@ func installRoles(t *testing.T) {
 
 func TestDeskAgainstAPIServer(t *testing.T) {
 	ctx := context.Background()
-	if err := admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+	if err := admin.Create(ctx, &corev1.Namespace{Name: ns}); err != nil {
 		t.Fatal(err)
 	}
 	installRoles(t)
 	editor := userToken(t, "eve", "test-editor")
 	proofreader := userToken(t, "pat", "test-proofreader")
 	outsider := userToken(t, "otto", "")
-	if err := admin.Create(ctx, &v1.Gazette{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "notes"},
+	if err := admin.Create(ctx, &v1.Gazette{Namespace: ns, Name: "notes",
 		Spec: v1.GazetteSpec{Title: "Alice's Notes", Domain: "alice.example.io"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +286,7 @@ func TestDeskAgainstAPIServer(t *testing.T) {
 	})
 
 	t.Run("previews with the Gazette's theme and the user's permissions", func(t *testing.T) {
-		d := v1.Dispatch{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "draft"}, Spec: v1.DispatchSpec{
+		d := v1.Dispatch{Namespace: ns, Name: "draft", Spec: v1.DispatchSpec{
 			GazetteRef: "notes", Title: "Draft title", Content: v1.DispatchContent{Body: "# Heading\n\n<script>x</script>body"},
 		}}
 		b, _ := json.Marshal(PreviewRequest{Dispatch: d})

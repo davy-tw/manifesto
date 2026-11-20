@@ -88,15 +88,15 @@ func TestMilestone1(t *testing.T) {
 		t.Fatal(err)
 	}
 	const ns, dom = "blog-alice", "alice.example.io"
-	mustCreate(t, k8s, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	mustCreate(t, k8s, &corev1.Namespace{Name: ns})
 	mustCreate(t, k8s, &v1.Gazette{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "alice-notes"},
-		Spec:       v1.GazetteSpec{Title: "Alice's Notes", Domain: dom},
+		Namespace: ns, Name: "alice-notes",
+		Spec: v1.GazetteSpec{Title: "Alice's Notes", Domain: dom},
 	})
 	// The API server stores times at second precision.
 	publishAt := metav1.NewTime(time.Now().Add(3 * time.Second).Truncate(time.Second))
 	mustCreate(t, k8s, &v1.Dispatch{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "hello-k8s"},
+		Namespace: ns, Name: "hello-k8s",
 		Spec: v1.DispatchSpec{
 			GazetteRef: "alice-notes", Title: "Hello K8s", State: v1.StatePublished, PublishAt: &publishAt,
 			Content: v1.DispatchContent{Body: "# Hello\n\nfrom a CRD"},

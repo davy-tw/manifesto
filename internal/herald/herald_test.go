@@ -29,15 +29,15 @@ var t0 = time.Date(2026, 11, 20, 1, 0, 0, 0, time.UTC)
 
 func gazette() v1.Gazette {
 	return v1.Gazette{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "blog-alice", Name: "notes", UID: "g-uid", ResourceVersion: "1",
-			CreationTimestamp: metav1.NewTime(t0)},
-		Spec: v1.GazetteSpec{Title: "Alice's Notes", Domain: host},
+		Namespace: "blog-alice", Name: "notes", UID: "g-uid", ResourceVersion: "1",
+		CreationTimestamp: metav1.NewTime(t0),
+		Spec:              v1.GazetteSpec{Title: "Alice's Notes", Domain: host},
 	}
 }
 
 func dispatch(name string, phase v1.DispatchPhase, publishedAt time.Time) v1.Dispatch {
 	d := v1.Dispatch{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "blog-alice", Name: name, UID: types.UID(name + "-uid"), ResourceVersion: "1"},
+		Namespace: "blog-alice", Name: name, UID: types.UID(name + "-uid"), ResourceVersion: "1",
 		Spec: v1.DispatchSpec{GazetteRef: "notes", Title: "Title of " + name,
 			Content: v1.DispatchContent{Body: "body of " + name}},
 		Status: v1.DispatchStatus{Phase: phase},

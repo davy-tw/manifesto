@@ -28,7 +28,7 @@ import (
 func newPrint(ns, name string, ref v1.ArchiveRef, body string) *v1.Print {
 	sum := sha256.Sum256([]byte(body))
 	return &v1.Print{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Namespace: ns, Name: name,
 		Spec: v1.PrintSpec{
 			ArchiveRef: ref, ContentType: "text/plain", Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:]),
 		},
@@ -59,7 +59,7 @@ var _ = Describe("Media", func() {
 	BeforeEach(func() {
 		name := fmt.Sprintf("local-%d", nsCounter.Add(1))
 		Expect(k8sClient.Create(ctx, &v1.ClusterArchive{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Name: name,
 			Spec: v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{
 				ClaimName: "manifesto-media-data", PublicURL: darkroomPublic.URL,
 			}},
@@ -69,12 +69,12 @@ var _ = Describe("Media", func() {
 
 	It("reports whether Archives are usable", func() {
 		archiveReady := func(a *v1.ClusterArchive) string { return readyReason(a.Status.Conditions) }
-		ok := &v1.ClusterArchive{ObjectMeta: metav1.ObjectMeta{Name: local.Name}}
+		ok := &v1.ClusterArchive{Name: local.Name}
 		Eventually(fetch(ok), timeout, interval).Should(WithTransform(archiveReady, Equal("True/"+v1.ReasonBackendReady)))
 
 		other := &v1.ClusterArchive{
-			ObjectMeta: metav1.ObjectMeta{Name: local.Name + "-other-claim"},
-			Spec:       v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "elsewhere", PublicURL: "https://media.example.io"}},
+			Name: local.Name + "-other-claim",
+			Spec: v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "elsewhere", PublicURL: "https://media.example.io"}},
 		}
 		Expect(k8sClient.Create(ctx, other)).To(Succeed())
 		Eventually(fetch(other), timeout, interval).Should(WithTransform(archiveReady, Equal("False/"+v1.ReasonBackendError)))
@@ -161,13 +161,13 @@ var _ = Describe("Media", func() {
 			WithTransform(func(p *v1.Print) string { return readyReason(p.Status.Conditions) }, Equal("False/"+v1.ReasonArchiveNotFound)))
 
 		Expect(k8sClient.Create(ctx, &v1.Archive{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "media"},
-			Spec:       v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "manifesto-media-data", PublicURL: darkroomPublic.URL}},
+			Namespace: ns, Name: "media",
+			Spec: v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "manifesto-media-data", PublicURL: darkroomPublic.URL}},
 		})).To(Succeed())
 		Eventually(fetch(p), timeout, interval).Should(WithTransform(func(p *v1.Print) string { return p.Status.UploadURL }, Not(BeEmpty())))
 
 		By("releasing a Print whose Archive is gone")
-		Expect(k8sClient.Delete(ctx, &v1.Archive{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "media"}})).To(Succeed())
+		Expect(k8sClient.Delete(ctx, &v1.Archive{Namespace: ns, Name: "media"})).To(Succeed())
 		Expect(k8sClient.Delete(ctx, p)).To(Succeed())
 		Eventually(func() bool { return apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(p), p)) },
 			timeout, interval).Should(BeTrue())

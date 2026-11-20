@@ -79,14 +79,12 @@ func (r *EditionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			number = editions[n-1].Spec.Number + 1
 		}
 		e := &v1.Edition{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: d.Namespace,
-				Name:      EditionName(d.Name, number),
-				Labels:    map[string]string{v1.EditionDispatchLabel: d.Name, labelManagedBy: v1.FieldManagerPress},
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: v1.GroupVersion.String(), Kind: "Dispatch", Name: d.Name, UID: d.UID, Controller: new(true),
-				}},
-			},
+			Namespace: d.Namespace,
+			Name:      EditionName(d.Name, number),
+			Labels:    map[string]string{v1.EditionDispatchLabel: d.Name, labelManagedBy: v1.FieldManagerPress},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: v1.GroupVersion.String(), Kind: "Dispatch", Name: d.Name, UID: d.UID, Controller: new(true),
+			}},
 			Spec: v1.EditionSpec{
 				DispatchRef: d.Name, Number: number, DispatchGeneration: d.Generation,
 				Digest: digest, Snapshot: snapshot,

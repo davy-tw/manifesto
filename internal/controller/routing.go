@@ -185,7 +185,7 @@ func (r *GazetteReconciler) listenerSet(g *v1.Gazette) *gatewayv1.ListenerSet {
 	httpsPort, httpPort := r.Routing.ports()
 	same := &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{From: new(gatewayv1.NamespacesFromSame)}}
 	return &gatewayv1.ListenerSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: routingName(g.Name)},
+		Namespace: g.Namespace, Name: routingName(g.Name),
 		Spec: gatewayv1.ListenerSetSpec{
 			ParentRef: gatewayv1.ParentGatewayReference{
 				Name:      gatewayv1.ObjectName(r.Routing.Gateway.Name),
@@ -231,18 +231,15 @@ func (r *GazetteReconciler) httpRoute(g *v1.Gazette) *gatewayv1.HTTPRoute {
 		}
 	}
 	return &gatewayv1.HTTPRoute{
-		ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: routingName(g.Name)},
+		Namespace: g.Namespace, Name: routingName(g.Name),
 		Spec: gatewayv1.HTTPRouteSpec{
 			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{parent}},
 			Hostnames:       []gatewayv1.Hostname{gatewayv1.Hostname(g.Spec.Domain)},
 			Rules: []gatewayv1.HTTPRouteRule{{
-				BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{
-					BackendObjectReference: gatewayv1.BackendObjectReference{
-						Name:      gatewayv1.ObjectName(r.Routing.Herald.Name),
-						Namespace: new(gatewayv1.Namespace(r.Routing.Herald.Namespace)),
-						Port:      new(r.Routing.HeraldPort),
-					},
-				}}},
+				BackendRefs: []gatewayv1.HTTPBackendRef{{
+					Name:      gatewayv1.ObjectName(r.Routing.Herald.Name),
+					Namespace: new(gatewayv1.Namespace(r.Routing.Herald.Namespace)),
+					Port:      new(r.Routing.HeraldPort)}},
 			}},
 		},
 	}
@@ -251,7 +248,7 @@ func (r *GazetteReconciler) httpRoute(g *v1.Gazette) *gatewayv1.HTTPRoute {
 // redirectRoute redirects the domain's plain HTTP traffic to HTTPS.
 func (r *GazetteReconciler) redirectRoute(g *v1.Gazette) *gatewayv1.HTTPRoute {
 	return &gatewayv1.HTTPRoute{
-		ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: redirectName(g.Name)},
+		Namespace: g.Namespace, Name: redirectName(g.Name),
 		Spec: gatewayv1.HTTPRouteSpec{
 			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{listenerParent(g, listenerHTTP)}},
 			Hostnames:       []gatewayv1.Hostname{gatewayv1.Hostname(g.Spec.Domain)},
@@ -335,15 +332,15 @@ func (r *GazetteReconciler) listenerSetObjects(g *v1.Gazette) []client.Object {
 	cert.SetNamespace(g.Namespace)
 	cert.SetName(routingName(g.Name))
 	return []client.Object{
-		&gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: redirectName(g.Name)}},
-		&gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: routingName(g.Name)}},
+		&gatewayv1.HTTPRoute{Namespace: g.Namespace, Name: redirectName(g.Name)},
+		&gatewayv1.ListenerSet{Namespace: g.Namespace, Name: routingName(g.Name)},
 		cert,
 	}
 }
 
 // deleteRouting removes the routing objects of g, if any.
 func (r *GazetteReconciler) deleteRouting(ctx context.Context, g *v1.Gazette) error {
-	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: routingName(g.Name)}}
+	route := &gatewayv1.HTTPRoute{Namespace: g.Namespace, Name: routingName(g.Name)}
 	return r.deleteObjects(ctx, append(r.listenerSetObjects(g), route)...)
 }
 
@@ -374,11 +371,9 @@ func (r *GazetteReconciler) reconcileReferenceGrant(ctx context.Context, namespa
 		}
 	}
 	grant := &gatewayv1.ReferenceGrant{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: r.Routing.Herald.Namespace,
-			Name:      referenceGrantName(namespace),
-			Labels:    map[string]string{labelNamespace: namespace},
-		},
+		Namespace: r.Routing.Herald.Namespace,
+		Name:      referenceGrantName(namespace),
+		Labels:    map[string]string{labelNamespace: namespace},
 	}
 	if !needed {
 		if err := r.Delete(ctx, grant); err != nil && !apierrors.IsNotFound(err) {

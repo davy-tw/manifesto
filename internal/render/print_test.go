@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
 )
 
@@ -126,7 +124,7 @@ func TestDefaultThemeShowsCoverAndLogo(t *testing.T) {
 }
 
 func TestPrintRefs(t *testing.T) {
-	d := &v1.Dispatch{ObjectMeta: metav1.ObjectMeta{Name: "d"}, Spec: v1.DispatchSpec{
+	d := &v1.Dispatch{Name: "d", Spec: v1.DispatchSpec{
 		Cover: "print:cover",
 		Content: v1.DispatchContent{Body: "![a](print:one) [b](print:two) ![again](print:one) " +
 			"![c](<print:three>) text print:not-a-link ![d](https://x/print:four)"},

@@ -20,7 +20,6 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -69,27 +68,27 @@ func TestUI(t *testing.T) {
 			t.Fatalf("creating %s: %v", obj.GetName(), err)
 		}
 	}
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: uiNS}}
+	ns := &corev1.Namespace{Name: uiNS}
 	mustCreate(ns, func() error { return admin.Create(ctx, ns) })
-	role := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "ui-editor"}, Rules: []rbacv1.PolicyRule{
+	role := &rbacv1.ClusterRole{Name: "ui-editor", Rules: []rbacv1.PolicyRule{
 		{APIGroups: []string{v1.GroupName}, Resources: all, Verbs: []string{"get", "list", "watch"}},
 		{APIGroups: []string{v1.GroupName}, Resources: []string{"dispatches", "sections", "stamps", "prints"}, Verbs: []string{"create", "update", "patch", "delete"}},
 	}}
 	mustCreate(role, func() error { return admin.Create(ctx, role) })
-	catalog := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "ui-catalog"}, Rules: []rbacv1.PolicyRule{
+	catalog := &rbacv1.ClusterRole{Name: "ui-catalog", Rules: []rbacv1.PolicyRule{
 		{APIGroups: []string{v1.GroupName}, Resources: []string{"clustertypesets", "clusterarchives"}, Verbs: []string{"get", "list", "watch"}},
 	}}
 	mustCreate(catalog, func() error { return admin.Create(ctx, catalog) })
 	group := rbacv1.Subject{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "oidc:blog-alice-editors"}
-	rb := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Namespace: uiNS, Name: "editors"},
+	rb := &rbacv1.RoleBinding{Namespace: uiNS, Name: "editors",
 		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ui-editor"}, Subjects: []rbacv1.Subject{group}}
 	mustCreate(rb, func() error { return admin.Create(ctx, rb) })
-	crb := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "ui-catalog"},
+	crb := &rbacv1.ClusterRoleBinding{Name: "ui-catalog",
 		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ui-catalog"}, Subjects: []rbacv1.Subject{group}}
 	mustCreate(crb, func() error { return admin.Create(ctx, crb) })
-	g := &v1.Gazette{ObjectMeta: metav1.ObjectMeta{Namespace: uiNS, Name: "notes"}, Spec: v1.GazetteSpec{Title: "Alice's Notes", Domain: "ui.example.io"}}
+	g := &v1.Gazette{Namespace: uiNS, Name: "notes", Spec: v1.GazetteSpec{Title: "Alice's Notes", Domain: "ui.example.io"}}
 	mustCreate(g, func() error { return admin.Create(ctx, g) })
-	ca := &v1.ClusterArchive{ObjectMeta: metav1.ObjectMeta{Name: "local"},
+	ca := &v1.ClusterArchive{Name: "local",
 		Spec: v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "manifesto-media-data", PublicURL: media.URL}}}
 	mustCreate(ca, func() error { return admin.Create(ctx, ca) })
 
@@ -108,9 +107,9 @@ func TestUI(t *testing.T) {
 	srv.Config.Handler = (&Server{Auth: a, Kube: kube, PublicURL: public, UI: UI(), Log: logr.Discard()}).Handler()
 
 	// A ServiceAccount for signing in with a pasted token.
-	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: uiNS, Name: "token-user"}}
+	sa := &corev1.ServiceAccount{Namespace: uiNS, Name: "token-user"}
 	mustCreate(sa, func() error { return admin.Create(ctx, sa) })
-	saBinding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Namespace: uiNS, Name: "token-user"},
+	saBinding := &rbacv1.RoleBinding{Namespace: uiNS, Name: "token-user",
 		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ui-editor"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: sa.Name, Namespace: uiNS}}}
 	mustCreate(saBinding, func() error { return admin.Create(ctx, saBinding) })

@@ -56,7 +56,7 @@ func TestMain(m *testing.M) {
 
 func validGazette(name string) *v1.Gazette {
 	return &v1.Gazette{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Name: name, Namespace: "default",
 		Spec: v1.GazetteSpec{
 			Title:    "Alice's Notes",
 			Domain:   "alice.example.io",
@@ -68,7 +68,7 @@ func validGazette(name string) *v1.Gazette {
 
 func validDispatch(name string) *v1.Dispatch {
 	return &v1.Dispatch{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Name: name, Namespace: "default",
 		Spec: v1.DispatchSpec{
 			GazetteRef: "alice-notes",
 			Title:      "Hello K8s",
@@ -176,10 +176,10 @@ func TestSectionValidation(t *testing.T) {
 		section v1.Section
 		wantErr string
 	}{
-		{"minimal", v1.Section{ObjectMeta: metav1.ObjectMeta{Name: "tech"}}, ""},
-		{"with parent", v1.Section{ObjectMeta: metav1.ObjectMeta{Name: "go"}, Spec: v1.SectionSpec{Parent: "tech"}}, ""},
-		{"own parent", v1.Section{ObjectMeta: metav1.ObjectMeta{Name: "loop"}, Spec: v1.SectionSpec{Parent: "loop"}}, "cannot be its own parent"},
-		{"dotted name", v1.Section{ObjectMeta: metav1.ObjectMeta{Name: "a.b"}}, "must be a DNS label"},
+		{"minimal", v1.Section{Name: "tech"}, ""},
+		{"with parent", v1.Section{Name: "go", Spec: v1.SectionSpec{Parent: "tech"}}, ""},
+		{"own parent", v1.Section{Name: "loop", Spec: v1.SectionSpec{Parent: "loop"}}, "cannot be its own parent"},
+		{"dotted name", v1.Section{Name: "a.b"}, "must be a DNS label"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -191,23 +191,23 @@ func TestSectionValidation(t *testing.T) {
 }
 
 func TestStampAndScribeValidation(t *testing.T) {
-	expectCreate(t, &v1.Stamp{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "default"}}, "")
-	expectCreate(t, &v1.Stamp{ObjectMeta: metav1.ObjectMeta{Name: "k8s.io", Namespace: "default"}}, "must be a DNS label")
-	expectCreate(t, &v1.Scribe{ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "default"},
+	expectCreate(t, &v1.Stamp{Name: "kubernetes", Namespace: "default"}, "")
+	expectCreate(t, &v1.Stamp{Name: "k8s.io", Namespace: "default"}, "must be a DNS label")
+	expectCreate(t, &v1.Scribe{Name: "alice", Namespace: "default",
 		Spec: v1.ScribeSpec{DisplayName: "Alice", Avatar: "print:alice", Identities: []string{"oidc:alice@example.io"}}}, "")
-	expectCreate(t, &v1.Scribe{ObjectMeta: metav1.ObjectMeta{Name: "nameless", Namespace: "default"}}, "spec.displayName")
+	expectCreate(t, &v1.Scribe{Name: "nameless", Namespace: "default"}, "spec.displayName")
 }
 
 func TestTypesetValidation(t *testing.T) {
 	inline := v1.TypesetSource{Inline: &v1.InlineTypesetSource{Templates: map[string]string{"layout.html": "x"}}}
-	ts := &v1.Typeset{ObjectMeta: metav1.ObjectMeta{Name: "mine", Namespace: "default"}, Spec: v1.TypesetSpec{Source: inline}}
+	ts := &v1.Typeset{Name: "mine", Namespace: "default", Spec: v1.TypesetSpec{Source: inline}}
 	expectCreate(t, ts, "")
 	if ts.Spec.ContractVersion != v1.ContractV1 {
 		t.Errorf("contractVersion = %q, want default %q", ts.Spec.ContractVersion, v1.ContractV1)
 	}
-	expectCreate(t, &v1.ClusterTypeset{ObjectMeta: metav1.ObjectMeta{Name: "shared"}, Spec: v1.TypesetSpec{Source: inline}}, "")
-	expectCreate(t, &v1.Typeset{ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"}}, "exactly one source")
-	expectCreate(t, &v1.Typeset{ObjectMeta: metav1.ObjectMeta{Name: "v9", Namespace: "default"},
+	expectCreate(t, &v1.ClusterTypeset{Name: "shared", Spec: v1.TypesetSpec{Source: inline}}, "")
+	expectCreate(t, &v1.Typeset{Name: "empty", Namespace: "default"}, "exactly one source")
+	expectCreate(t, &v1.Typeset{Name: "v9", Namespace: "default",
 		Spec: v1.TypesetSpec{ContractVersion: "v9", Source: inline}}, "spec.contractVersion")
 }
 
@@ -228,7 +228,7 @@ const testSHA = "9f2c6b1a0e5d4c3b2a1908f7e6d5c4b3a29180f7e6d5c4b3a2918f7e6d5c4b3
 
 func validPrint(name string) *v1.Print {
 	return &v1.Print{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Name: name, Namespace: "default",
 		Spec: v1.PrintSpec{
 			ArchiveRef:  v1.ArchiveRef{Name: "local"},
 			ContentType: "image/png",
@@ -289,10 +289,10 @@ func TestArchiveValidation(t *testing.T) {
 	}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			expectCreate(t, &v1.Archive{ObjectMeta: metav1.ObjectMeta{Name: "archive-" + string(rune('a'+i)), Namespace: "default"}, Spec: tt.spec}, tt.wantErr)
+			expectCreate(t, &v1.Archive{Name: "archive-" + string(rune('a'+i)), Namespace: "default", Spec: tt.spec}, tt.wantErr)
 		})
 	}
-	ca := &v1.ClusterArchive{ObjectMeta: metav1.ObjectMeta{Name: "shared-s3"}, Spec: v1.ArchiveSpec{S3: s3}}
+	ca := &v1.ClusterArchive{Name: "shared-s3", Spec: v1.ArchiveSpec{S3: s3}}
 	expectCreate(t, ca, "")
 	if ca.Spec.S3.Region != "us-east-1" || ca.Spec.S3.PathStyle == nil || !*ca.Spec.S3.PathStyle {
 		t.Errorf("s3 defaults = region %q, pathStyle %v", ca.Spec.S3.Region, ca.Spec.S3.PathStyle)

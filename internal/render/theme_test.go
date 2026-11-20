@@ -19,17 +19,17 @@ import (
 
 func testGazette() *v1.Gazette {
 	return &v1.Gazette{
-		ObjectMeta: metav1.ObjectMeta{Name: "alice-notes"},
-		Spec:       v1.GazetteSpec{Title: "Alice's Notes", Tagline: "寫給未來的自己", Domain: "alice.example.io", Language: "zh-TW"},
+		Name: "alice-notes",
+		Spec: v1.GazetteSpec{Title: "Alice's Notes", Tagline: "寫給未來的自己", Domain: "alice.example.io", Language: "zh-TW"},
 	}
 }
 
 func testDispatch(name, title, body string) *v1.Dispatch {
 	at := metav1.NewTime(time.Date(2026, 11, 20, 1, 0, 0, 0, time.UTC))
 	return &v1.Dispatch{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       v1.DispatchSpec{Title: title, Summary: "summary of " + name, Content: v1.DispatchContent{Body: body}},
-		Status:     v1.DispatchStatus{PublishedAt: &at},
+		Name:   name,
+		Spec:   v1.DispatchSpec{Title: title, Summary: "summary of " + name, Content: v1.DispatchContent{Body: body}},
+		Status: v1.DispatchStatus{PublishedAt: &at},
 	}
 }
 

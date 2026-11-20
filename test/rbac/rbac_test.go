@@ -21,7 +21,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -131,9 +130,9 @@ func user(t *testing.T, name string, groups ...string) client.Client {
 func bind(t *testing.T, ns, role, group string) {
 	t.Helper()
 	rb := &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: role + "-" + group},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: namePrefix + role},
-		Subjects:   []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "Group", Name: group}},
+		Namespace: ns, Name: role + "-" + group,
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: namePrefix + role},
+		Subjects: []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "Group", Name: group}},
 	}
 	if err := admin.Create(context.Background(), rb); err != nil {
 		t.Fatal(err)
@@ -142,7 +141,7 @@ func bind(t *testing.T, ns, role, group string) {
 
 func namespace(t *testing.T, name string) {
 	t.Helper()
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	ns := &corev1.Namespace{Name: name}
 	if err := admin.Create(context.Background(), ns); err != nil {
 		t.Fatal(err)
 	}
@@ -160,12 +159,12 @@ func expect(t *testing.T, what string, allowed bool, err error) {
 }
 
 func dispatch(ns, name string) *v1.Dispatch {
-	return &v1.Dispatch{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+	return &v1.Dispatch{Namespace: ns, Name: name,
 		Spec: v1.DispatchSpec{GazetteRef: "notes", Title: "T"}}
 }
 
 func print(ns, name string) *v1.Print {
-	return &v1.Print{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}, Spec: v1.PrintSpec{
+	return &v1.Print{Namespace: ns, Name: name, Spec: v1.PrintSpec{
 		ArchiveRef: v1.ArchiveRef{Name: "local"}, ContentType: "image/png", Size: 1,
 		SHA256: "0000000000000000000000000000000000000000000000000000000000000000",
 	}}
@@ -173,12 +172,12 @@ func print(ns, name string) *v1.Print {
 
 // edition returns an Edition in the test namespace.
 func edition(name string) *v1.Edition {
-	return &v1.Edition{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: name},
+	return &v1.Edition{Namespace: testNamespace, Name: name,
 		Spec: v1.EditionSpec{DispatchRef: "existing", Number: 1, Snapshot: v1.EditionSnapshot{Title: "T"}}}
 }
 
 func gazette(ns, name string) *v1.Gazette {
-	return &v1.Gazette{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+	return &v1.Gazette{Namespace: ns, Name: name,
 		Spec: v1.GazetteSpec{Title: "T", Domain: name + ".example.io"}}
 }
 
@@ -186,9 +185,9 @@ func gazette(ns, name string) *v1.Gazette {
 // "newcomer" a role.
 func member(role string) *rbacv1.RoleBinding {
 	return &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: "newcomer-" + role},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role},
-		Subjects:   []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "User", Name: "newcomer"}},
+		Namespace: testNamespace, Name: "newcomer-" + role,
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role},
+		Subjects: []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "User", Name: "newcomer"}},
 	}
 }
 
@@ -226,11 +225,11 @@ func TestRoles(t *testing.T) {
 	t.Run("editor writes content but not the site", func(t *testing.T) {
 		expect(t, "create dispatch", true, editor.Create(ctx, dispatch(ns, "e1")))
 		expect(t, "create print", true, editor.Create(ctx, print(ns, "e1")))
-		section := &v1.Section{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "tech"}}
+		section := &v1.Section{Namespace: ns, Name: "tech"}
 		expect(t, "create section", true, editor.Create(ctx, section))
 		expect(t, "create gazette", false, editor.Create(ctx, gazette(ns, "e1")))
 		expect(t, "create scribe", false, editor.Create(ctx, &v1.Scribe{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "eve"}, Spec: v1.ScribeSpec{DisplayName: "Eve"}}))
+			Namespace: ns, Name: "eve", Spec: v1.ScribeSpec{DisplayName: "Eve"}}))
 		expect(t, "add a member", false, editor.Create(ctx, member(namePrefix+"proofreader")))
 		expect(t, "create dispatch in another namespace", false, editor.Create(ctx, dispatch(other, "e1")))
 		expect(t, "write print status", false, editor.Status().Update(ctx, print(ns, "e1")))
@@ -242,8 +241,8 @@ func TestRoles(t *testing.T) {
 	t.Run("publisher runs the site and its members", func(t *testing.T) {
 		expect(t, "create gazette", true, publisher.Create(ctx, gazette(ns, "pia")))
 		expect(t, "create archive", true, publisher.Create(ctx, &v1.Archive{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "bucket"},
-			Spec:       v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "c", PublicURL: "https://m.example.io"}}}))
+			Namespace: ns, Name: "bucket",
+			Spec: v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "c", PublicURL: "https://m.example.io"}}}))
 		expect(t, "make someone an editor", true, publisher.Create(ctx, member(namePrefix+"editor")))
 		expect(t, "make someone a publisher", true, publisher.Create(ctx, member(namePrefix+"publisher")))
 		expect(t, "make someone cluster-admin", false, publisher.Create(ctx, member("cluster-admin")))
@@ -258,7 +257,7 @@ func TestRoles(t *testing.T) {
 		expect(t, "list cluster archives", true, outsider.List(ctx, &v1.ClusterArchiveList{}))
 		inline := &v1.InlineTypesetSource{Templates: map[string]string{"layout.html": "x"}}
 		expect(t, "create cluster typeset", false, publisher.Create(ctx, &v1.ClusterTypeset{
-			ObjectMeta: metav1.ObjectMeta{Name: "mine"}, Spec: v1.TypesetSpec{Source: v1.TypesetSource{Inline: inline}}}))
+			Name: "mine", Spec: v1.TypesetSpec{Source: v1.TypesetSource{Inline: inline}}}))
 		expect(t, "list dispatches", false, outsider.List(ctx, &v1.DispatchList{}, client.InNamespace(ns)))
 	})
 }
