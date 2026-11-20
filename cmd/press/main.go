@@ -18,6 +18,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -114,6 +115,10 @@ func main() {
 	var editions int
 	flag.IntVar(&editions, "editions", controller.DefaultEditionLimit,
 		"How many Editions (revisions) to keep per Dispatch; a negative number stops recording them.")
+	editionBytes := resource.MustParse("2Mi")
+	flag.Func("edition-bytes", "How much content (e.g. 2Mi) to keep in the Editions of one Dispatch, "+
+		"so revisions cannot fill etcd; the newest is always kept. 0 means no bound. Default 2Mi.",
+		func(v string) (err error) { editionBytes, err = resource.ParseQuantity(v); return err })
 	flag.DurationVar(&media.UploadTTL, "upload-ttl", 5*time.Minute, "How long a Print's upload URL stays valid.")
 	var deskSecret string
 	flag.StringVar(&deskSecret, "desk-session-secret", "manifesto-desk-session",
@@ -256,6 +261,7 @@ func main() {
 
 	pressOpts := controller.Options{
 		Clock: clock.RealClock{}, Routing: routing, Media: media, Editions: editions,
+		EditionBytes: editionBytesOption(editionBytes.Value()),
 	}
 	if err := controller.Setup(mgr, pressOpts); err != nil {
 		setupLog.Error(err, "Failed to set up controllers")
@@ -277,4 +283,13 @@ func main() {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}
+}
+
+// editionBytesOption maps --edition-bytes to controller.Options: 0 there
+// means the default, so "no bound" becomes -1.
+func editionBytesOption(n int64) int64 {
+	if n <= 0 {
+		return -1
+	}
+	return n
 }

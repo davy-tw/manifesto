@@ -198,7 +198,7 @@ func TestChartValues(t *testing.T) {
 		}
 		a := args(t, objs, "manifesto-controller-manager")
 		for _, want := range []string{"--herald-service=" + ns + "/manifesto-herald",
-			"--darkroom-url=http://manifesto-darkroom." + ns + ".svc:8081", "--editions=20"} {
+			"--darkroom-url=http://manifesto-darkroom." + ns + ".svc:8081", "--editions=20", "--edition-bytes=2Mi"} {
 			if !slices.Contains(a, want) {
 				t.Errorf("press args %v lack %s", a, want)
 			}

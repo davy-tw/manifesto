@@ -51,7 +51,7 @@ helm install manifesto charts/manifesto -n manifesto-system \
 |---|---|
 | `imageRegistry`、`<元件>.image.repository/tag` | image 位置；tag 預設是 chart 的 appVersion |
 | `press.routing.*` | Gateway 路由（`gatewayName`、`gatewayNamespace`、`mode`、`gatewaySection`、`clusterIssuer`） |
-| `press.editions` | 每篇保留的 Edition 數 |
+| `press.editions`、`press.editionBytes` | 每篇保留的 Edition 數與內容總量上限（預設 20 版、2Mi），避免修訂版本塞滿 etcd |
 | `darkroom.enabled`、`darkroom.persistence.*` | 媒體（pvc Archive）與它的 PVC；全部用 S3 時可以關掉 |
 | `desk.publicURL`、`desk.oidc.*`、`desk.tokenSignIn` | desk 的網址與登入方式 |
 

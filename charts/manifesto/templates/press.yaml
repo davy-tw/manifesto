@@ -39,6 +39,7 @@ spec:
         - --health-probe-bind-address=:8081
         - --herald-service={{ .Release.Namespace }}/manifesto-herald
         - --editions={{ $p.editions }}
+        - --edition-bytes={{ $p.editionBytes }}
         - --upload-ttl={{ $p.uploadTTL }}
         {{- if .Values.darkroom.enabled }}
         - --darkroom-url=http://manifesto-darkroom.{{ .Release.Namespace }}.svc:8081

@@ -339,10 +339,10 @@ status:
 
 - press 在 Dispatch 的內容（title、summary、cover、scribeRef、content）改變時建立 Edition；只改 state、publishAt、gazetteRef 或分類 label 不算
 - 名稱是 `<dispatch>-<number>`，number 從 1 遞增；用 label `manifesto.davy.tw/dispatch` 查詢。和最新一版的 `digest` 相同就不建立，所以 reconcile 冪等
-- 每篇保留最近 20 版（press 的 `--editions`；負數停止記錄），更舊的由 press 刪除。ownerReference 指向 Dispatch，刪文章時一起回收
+- 每篇保留最近 20 版（press 的 `--editions`；負數停止記錄），而且這些版本的內容合計不超過 2 MiB（`--edition-bytes`；0 不限制），從最新一版往回算，超過的由 press 刪除，最新一版一定保留。ownerReference 指向 Dispatch，刪文章時一起回收
 - spec 用 CEL 禁止修改；所有角色都能讀，只有 publisher 能刪除（例如移除不該留下的內容），沒有人能建立
 - 還原：把舊版的 snapshot 複製回 Dispatch（desk 的 History、`mfctl edition restore`），這會成為新的一版，歷史不會被改寫
-- 一篇最多 512KB，20 版最多約 10MB 在 etcd；內容很長的站可以調低 `--editions`
+- 為什麼限制大小：Edition 存在 etcd，整個叢集共用。一篇最多 512KB，只限版數的話一篇最多約 10MB；k3s 用內嵌 etcd 時預設上限 2 GiB，用滿後整個叢集變成唯讀（單節點預設的 SQLite 沒有這個上限）。2 MiB 是一般文章的 20 版，或最大文章的 4 版
 
 ## mfctl（命令列工具）
 
@@ -364,8 +364,9 @@ status:
 - Markdown 編輯與即時預覽：預覽呼叫共用的 `internal/render`，套用真正的主題
 - 透過 watch 即時顯示 `phase` 變化
 - 編輯器的 History 列出 Edition，可以把舊版載入編輯器，儲存後即還原
-- 編輯衝突以 `resourceVersion` 樂觀鎖偵測（API 回 409 時提示合併）；寫入用 Server-Side Apply，fieldManager 為 `manifesto-desk`
+- 編輯衝突以 `resourceVersion` 樂觀鎖偵測（API 回 409 時提示合併）；寫入用 Server-Side Apply，fieldManager 為 `manifesto-desk`，一律 `force=true`：`mfctl edition restore` 或 `kubectl edit` 改過的欄位屬於別的 field manager，不 force 的話作者存檔會被誤判為衝突；真正的並行編輯由 resourceVersion 擋下
 - 登入用 OIDC authorization code + PKCE；ID token 與 refresh token 以 AES-GCM 加密存在 cookie（金鑰由 press 建立在 Secret `manifesto-desk-session`），desk 不保存任何 session，可以多副本
+- desk 以 volume 掛載這個 Secret：初次安裝時 press 啟動前，desk 的 Pod 會停在 ContainerCreating，press 建立 Secret 後 kubelet 自動重試，不需要安排啟動順序（`helm install --wait` 會等到兩者都 Ready）
 - 代理只轉送 Manifesto 需要的路徑（manifesto.davy.tw 資源、events、RoleBinding、SelfSubject*Review），其他回 404；用 cookie 的寫入必須帶 `X-Manifesto-Desk` header 且 Origin 相同，防止 CSRF
 - 也接受 `Authorization: Bearer`（不經 cookie），方便腳本與測試
 - 選用的 token 登入（`--token-sign-in`）：使用者貼上 API server 認得的 token（例如 ServiceAccount token），desk 以 SelfSubjectReview 確認後存進同一個加密 cookie；session 在 token 的 `exp` 或 12 小時到期，不能 refresh。登入請求同樣要求 CSRF header，避免別的網站讓訪客以別人的身分登入

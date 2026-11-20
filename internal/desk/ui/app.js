@@ -223,10 +223,12 @@ async function editorView(ns, name) {
   };
   for (const el of Object.values(f)) el.addEventListener('input', refreshPreview);
 
-  const save = async (force = false) => {
+  // overwrite drops the resourceVersion: the user chose their version over
+  // someone else's newer one.
+  const save = async (overwrite = false) => {
     message.replaceChildren();
     try {
-      const saved = await api.apply(ns, 'dispatches', build(!force), { force });
+      const saved = await api.apply(ns, 'dispatches', build(!overwrite));
       dispatch = saved;
       message.replaceChildren(notice('Saved.', 'ok'));
       if (!name) location.hash = `#/ns/${encodeURIComponent(ns)}/dispatches/${encodeURIComponent(saved.metadata.name)}`;

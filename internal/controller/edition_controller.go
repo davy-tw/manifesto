@@ -31,14 +31,23 @@ import (
 // DefaultEditionLimit is how many Editions press keeps per Dispatch.
 const DefaultEditionLimit = 20
 
+// DefaultEditionBytes is how much content press keeps in the Editions of
+// one Dispatch (2 MiB): twenty versions of a typical post, or four of the
+// largest Dispatch body. Editions live in etcd, whose space the cluster
+// shares.
+const DefaultEditionBytes = 2 << 20
+
 // EditionReconciler records an Edition each time the content of a Dispatch
-// changes, and keeps the most recent Limit of them.
+// changes, and keeps the most recent ones within Limit and MaxBytes.
 type EditionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	// Limit is how many Editions to keep per Dispatch; 0 or less turns
 	// Editions off (existing ones are left alone).
 	Limit int
+	// MaxBytes bounds the content kept per Dispatch (see EditionSize); 0 or
+	// less means no bound. The newest Edition is always kept.
+	MaxBytes int64
 }
 
 // +kubebuilder:rbac:groups=manifesto.davy.tw,resources=editions,verbs=get;list;watch;create;patch;delete
@@ -94,7 +103,7 @@ func (r *EditionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		logf.FromContext(ctx).Info("Recorded an Edition", "edition", e.Name)
 		editions = append(editions, *e)
 	}
-	for i := 0; i < len(editions)-r.Limit; i++ {
+	for _, i := range editionsToPrune(editions, r.Limit, r.MaxBytes) {
 		old := &editions[i]
 		if err := r.Delete(ctx, old, client.Preconditions{UID: &old.UID}); client.IgnoreNotFound(err) != nil &&
 			!apierrors.IsConflict(err) {
@@ -118,6 +127,30 @@ func (r *EditionReconciler) editionsOf(ctx context.Context, d *v1.Dispatch) ([]v
 	})
 	slices.SortFunc(editions, func(a, b v1.Edition) int { return int(a.Spec.Number - b.Spec.Number) })
 	return editions, nil
+}
+
+// editionsToPrune returns the indexes of editions (oldest first) beyond the
+// newest limit of them or, counting back from the newest, beyond maxBytes
+// of content. The newest is always kept.
+func editionsToPrune(editions []v1.Edition, limit int, maxBytes int64) []int {
+	var prune []int
+	var total int64
+	for i := len(editions) - 1; i >= 0; i-- {
+		kept := len(editions) - 1 - i
+		total += EditionSize(&editions[i])
+		if kept > 0 && (kept >= limit || (maxBytes > 0 && total > maxBytes)) {
+			prune = append(prune, i)
+		}
+	}
+	slices.Reverse(prune)
+	return prune
+}
+
+// EditionSize is the size of an Edition's content, as press counts it
+// against MaxBytes: its snapshot as JSON.
+func EditionSize(e *v1.Edition) int64 {
+	b, _ := json.Marshal(e.Spec.Snapshot)
+	return int64(len(b))
 }
 
 // SnapshotOf is the part of a Dispatch an Edition records.

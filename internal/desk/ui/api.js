@@ -54,12 +54,14 @@ export const remove = (ns, plural, name) =>
   call('DELETE', `${collection(ns, plural)}/${encodeURIComponent(name)}`);
 export const preview = (dispatch) => call('POST', '/api/preview', { body: { dispatch } });
 
-// apply writes obj with server-side apply as manifesto-desk. When
-// obj.metadata.resourceVersion is set, the API server refuses the write with
-// 409 if someone changed the object since it was read.
-export function apply(ns, plural, obj, { force = false } = {}) {
-  const q = `fieldManager=${FIELD_MANAGER}${force ? '&force=true' : ''}`;
-  return call('PATCH', `${collection(ns, plural)}/${encodeURIComponent(obj.metadata.name)}?${q}`, {
+// apply writes obj with server-side apply as manifesto-desk. It always
+// forces field ownership: fields last written by someone else (mfctl edition
+// restore, kubectl edit) must not block an author's save. Concurrent edits
+// are caught by the resourceVersion instead: when obj.metadata.resourceVersion
+// is set, the API server refuses the write with 409 if the object changed
+// since it was read. Leave it out only to overwrite on purpose.
+export function apply(ns, plural, obj) {
+  return call('PATCH', `${collection(ns, plural)}/${encodeURIComponent(obj.metadata.name)}?fieldManager=${FIELD_MANAGER}&force=true`, {
     body: { apiVersion: `${GROUP}/${VERSION}`, ...obj },
     contentType: 'application/apply-patch+yaml',
   });

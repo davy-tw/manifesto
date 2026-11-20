@@ -17,6 +17,9 @@ press:
     pullPolicy: IfNotPresent
   # How many Editions (revisions) to keep per Dispatch; negative stops recording.
   editions: 20
+  # How much content to keep in one Dispatch's Editions, so revisions cannot
+  # fill etcd (k3s with embedded etcd: 2 GiB by default). 0 means no bound.
+  editionBytes: 2Mi
   # How long a Print's upload URL stays valid.
   uploadTTL: 5m
   # Routing: press attaches each Gazette's domain to a Gateway. Leave

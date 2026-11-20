@@ -53,7 +53,7 @@ Manifesto 是完全 Kubernetes 原生的部落格引擎：內容都是 CRD，邏
 
 - Go + kubebuilder + controller-runtime；API 版本從 `v1alpha1` 開始
 - spec 是期望狀態，status 是觀察到的狀態；狀態一律用 `metav1.Condition`，並維護 `observedGeneration`
-- 寫入一律用 Server-Side Apply（fieldManager 用元件名稱，例如 `manifesto-press`）
+- 寫入一律用 Server-Side Apply（fieldManager 用元件名稱，例如 `manifesto-press`）。例外：`mfctl edition restore` 用帶 resourceVersion 的 merge patch（還原必須移除 Edition 沒有的欄位，apply 做不到），不要改回 apply；desk 的 apply 一律 `force=true`，靠 resourceVersion 偵測並行編輯
 - 欄位驗證寫在 CRD schema 與 CEL（`x-kubernetes-validations`）；引用是否存在由 press 檢查並寫入 conditions
 - Section / Stamp 用 label 存英文代號：`section.manifesto.davy.tw/name: <name>`、`stamp.manifesto.davy.tw/<name>: ""`
 - `internal/render` 是 press 與 herald 共用的渲染套件（goldmark + bluemonday + html/template）
@@ -80,7 +80,7 @@ M1（MVP）、M2（內容與網站）、M3（媒體，PVC 與 S3 後端）、M4�
 - 角色：`config/rbac/manifesto_roles.yaml`（envtest 在 `test/rbac`）
 - mfctl：`internal/mfctl`（cobra；`typeset build`、`print upload`、`edition list|show|restore`，envtest 內跑 press 與 darkroom）與 `cmd/mfctl`
 - Helm chart：`charts/manifesto`（CRD 與 RBAC 由 `make chart` 從 kustomize 輸出產生到 `files/`，不要手改；`test/chart` 比對 chart 與 kustomize；k3d E2E 用 Helm 安裝）
-- Edition：`internal/controller/edition_controller.go`（內容 digest 改變才建立 `<dispatch>-<n>`，保留 `--editions` 版，預設 20；spec 以 CEL 禁止修改）
+- Edition：`internal/controller/edition_controller.go`（內容 digest 改變才建立 `<dispatch>-<n>`，保留 `--editions` 版且總內容不超過 `--edition-bytes`，預設 20 版、2Mi，最新一版一定保留；spec 以 CEL 禁止修改）
 - 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 與 k3d（k3s + Traefik，`make test-e2e-k3d`，含 gateway 路由經過 Traefik 的驗證）上的 E2E 在 `test/e2e`，CI 兩者都跑；envtest 用的第三方 CRD 在 `test/crds`
 
 目標環境：先以 k3s（內建 Traefik）做小規模正式測試，見 `docs/k3s.md`。新功能要能在 k3s 上運作：Traefik 不支援 ListenerSet（v3.8 前）、listener port 必須是 entrypoint port（8000/8443）、預設 StorageClass `local-path` 只有 RWO。
