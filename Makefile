@@ -263,7 +263,7 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
 HELM_VERSION ?= v4.3.1
-GORELEASER_VERSION ?= v2.20.0
+GORELEASER_VERSION ?= v2.17.1
 CONTROLLER_TOOLS_VERSION ?= v0.22.0
 
 #ENVTEST_VERSION is the controller-runtime version to use for setup-envtest, derived from go.mod
