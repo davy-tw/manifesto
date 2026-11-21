@@ -1,0 +1,108 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  - listenersets
+  - referencegrants
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - manifesto.davy.tw
+  resources:
+  - archives
+  - clusterarchives
+  - clustertypesets
+  - dispatches
+  - gazettes
+  - scribes
+  - sections
+  - stamps
+  - typesets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - manifesto.davy.tw
+  resources:
+  - archives/status
+  - clusterarchives/status
+  - clustertypesets/status
+  - dispatches/status
+  - gazettes/status
+  - prints/status
+  - sections/status
+  - typesets/status
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - manifesto.davy.tw
+  resources:
+  - editions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - manifesto.davy.tw
+  resources:
+  - prints
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: manager-role
+  namespace: manifesto-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - get

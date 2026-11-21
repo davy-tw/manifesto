@@ -1,0 +1,26 @@
+# This kustomization.yaml is not intended to be run by itself,
+# since it depends on service name and namespace that are out of this kustomize package.
+# It should be run by config/default
+resources:
+- bases/manifesto.davy.tw_gazettes.yaml
+- bases/manifesto.davy.tw_dispatches.yaml
+- bases/manifesto.davy.tw_scribes.yaml
+- bases/manifesto.davy.tw_sections.yaml
+- bases/manifesto.davy.tw_stamps.yaml
+- bases/manifesto.davy.tw_typesets.yaml
+- bases/manifesto.davy.tw_clustertypesets.yaml
+- bases/manifesto.davy.tw_prints.yaml
+- bases/manifesto.davy.tw_archives.yaml
+- bases/manifesto.davy.tw_clusterarchives.yaml
+- bases/manifesto.davy.tw_editions.yaml
+# +kubebuilder:scaffold:crdkustomizeresource
+
+patches:
+# [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
+# patches here are for enabling the conversion webhook for each CRD
+# +kubebuilder:scaffold:crdkustomizewebhookpatch
+
+# [WEBHOOK] To enable webhook, uncomment the following section
+# the following config is for teaching kustomize how to do kustomization for CRDs.
+#configurations:
+#- kustomizeconfig.yaml

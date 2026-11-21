@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: desk
+  namespace: system
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: desk
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      app.kubernetes.io/component: desk
+  # Sessions live in sealed cookies, so desk keeps no state.
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: manifesto
+        app.kubernetes.io/component: desk
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - command:
+        - /manager
+        args:
+        - --bind-address=:8080
+        # Set these for browser sign-in (see docs/k3s.md). Without
+        # --oidc-issuer desk serves only API clients sending bearer tokens.
+        - --public-url=https://desk.example.io
+        # - --oidc-issuer=https://auth.example.io
+        # - --oidc-client-id=manifesto-desk
+        # - --oidc-scopes=openid,email,profile,offline_access,groups
+        # Sign in by pasting a token (kubectl create token ...), with or without OIDC:
+        # - --token-sign-in
+        - --session-key-file=/etc/desk/session/key
+        env:
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: manifesto-desk-oidc
+              key: clientSecret
+              optional: true
+        image: desk:latest
+        name: desk
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+        volumeMounts:
+        - name: session
+          mountPath: /etc/desk/session
+          readOnly: true
+      volumes:
+      - name: session
+        secret:
+          # Created by press on its first start (--desk-session-secret).
+          secretName: manifesto-desk-session
+      serviceAccountName: desk
+      terminationGracePeriodSeconds: 10

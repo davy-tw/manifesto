@@ -1,0 +1,74 @@
+name: Release check
+
+# Runs what the release does, without publishing, whenever what it depends
+# on changes (the Makefile installs the release tools and builds the images): every image for both platforms, the packaged chart and the
+# mfctl archives.
+on:
+  push:
+    paths:
+      - .github/workflows/release*.yml
+      - .goreleaser.yaml
+      - Makefile
+      - Dockerfile
+      - .dockerignore
+      - charts/**
+      - go.mod
+  pull_request:
+    paths:
+      - .github/workflows/release*.yml
+      - .goreleaser.yaml
+      - Makefile
+      - Dockerfile
+      - .dockerignore
+      - charts/**
+      - go.mod
+
+permissions: {}
+
+jobs:
+  images:
+    name: Image ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        component: [press, herald, darkroom, desk]
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Build for every platform
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: make docker-buildx COMPONENT="$COMPONENT" IMG="manifesto-$COMPONENT:check"
+
+  chart-and-mfctl:
+    name: Chart and mfctl
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: .go-version
+
+      - name: Package the chart
+        run: |
+          make helm chart-lint
+          bin/helm package charts/manifesto --version 0.0.0-check --app-version v0.0.0-check -d bin/chart
+
+      - name: Build the mfctl archives
+        run: |
+          export OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          make goreleaser
+          bin/goreleaser release --snapshot --clean --skip=publish

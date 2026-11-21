@@ -1,0 +1,136 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: editions.manifesto.davy.tw
+spec:
+  group: manifesto.davy.tw
+  names:
+    categories:
+    - manifesto
+    kind: Edition
+    listKind: EditionList
+    plural: editions
+    shortNames:
+    - revision
+    singular: edition
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.dispatchRef
+      name: Dispatch
+      type: string
+    - jsonPath: .spec.number
+      name: Number
+      type: integer
+    - jsonPath: .spec.snapshot.title
+      name: Title
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Edition is a revision of a Dispatch. press creates one each time the
+          content of a Dispatch changes and keeps the most recent ones; deleting the
+          Dispatch deletes its Editions. Restoring an Edition means copying its
+          snapshot back into the Dispatch, which in turn becomes a new Edition.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec is the recorded revision
+            properties:
+              digest:
+                description: 'digest identifies the snapshot''s content: "sha256:<hex>".'
+                maxLength: 71
+                type: string
+              dispatchGeneration:
+                description: |-
+                  dispatchGeneration is the Dispatch's metadata.generation the snapshot
+                  was taken from.
+                format: int64
+                type: integer
+              dispatchRef:
+                description: dispatchRef is the name of the Dispatch, in the same
+                  namespace.
+                maxLength: 63
+                minLength: 1
+                type: string
+              number:
+                description: |-
+                  number counts the Dispatch's Editions from 1, in the order press saw
+                  the changes.
+                format: int64
+                minimum: 1
+                type: integer
+              snapshot:
+                description: snapshot is the content of the Dispatch.
+                properties:
+                  content:
+                    description: content is the body.
+                    properties:
+                      body:
+                        description: |-
+                          body is the article text. Media is referenced as "print:<name>", for
+                          example ![cover](print:hero-image).
+                        maxLength: 524288
+                        type: string
+                      format:
+                        default: markdown
+                        description: format is the markup language of body.
+                        enum:
+                        - markdown
+                        type: string
+                    type: object
+                  cover:
+                    description: cover is the cover image, "print:<name>".
+                    maxLength: 259
+                    pattern: ^print:[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  scribeRef:
+                    description: scribeRef is the author.
+                    maxLength: 253
+                    type: string
+                  summary:
+                    description: summary is the short description.
+                    maxLength: 1024
+                    type: string
+                  title:
+                    description: title is the headline.
+                    maxLength: 256
+                    type: string
+                type: object
+            required:
+            - dispatchRef
+            - number
+            - snapshot
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: an Edition is a record of the past and cannot be changed
+          rule: self.spec == oldSelf.spec
+    served: true
+    storage: true
+    subresources: {}

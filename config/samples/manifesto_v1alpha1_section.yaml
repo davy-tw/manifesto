@@ -1,0 +1,10 @@
+apiVersion: manifesto.davy.tw/v1alpha1
+kind: Section
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+  name: tech
+spec:
+  displayName: 技術
+  description: 技術相關文章

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="{{ with .Gazette.Language }}{{ . }}{{ else }}en{{ end }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ block "title" . }}{{ .Gazette.Title }}{{ end }}</title>
+<link rel="alternate" type="application/rss+xml" title="{{ .Gazette.Title }}" href="/wire.xml">
+<style>{{ asset "style.css" }}</style>
+</head>
+<body>
+<header>
+<a class="site" href="/">{{ with .Gazette.Logo }}<img class="logo" src="{{ . }}" alt="">{{ end }}{{ .Gazette.Title }}</a>
+{{ with .Gazette.Tagline }}<p class="tagline">{{ . }}</p>{{ end }}
+</header>
+<main>
+{{ block "content" . }}{{ end }}
+</main>
+</body>
+</html>

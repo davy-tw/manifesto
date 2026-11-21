@@ -1,0 +1,25 @@
+apiVersion: manifesto.davy.tw/v1alpha1
+kind: Dispatch
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/managed-by: kustomize
+    section.manifesto.davy.tw/name: tech
+    stamp.manifesto.davy.tw/kubernetes: ""
+  name: hello-k8s
+spec:
+  gazetteRef: alice-notes
+  scribeRef: alice
+  title: "Hello K8s"
+  summary: "第一篇文章"
+  cover: print:hello-cover
+  state: Published
+  publishAt: "2026-11-20T09:00:00+08:00"
+  content:
+    format: markdown
+    body: |
+      # Hello K8s
+
+      這篇文章是一個 Dispatch。
+
+      ![封面](print:hello-cover)

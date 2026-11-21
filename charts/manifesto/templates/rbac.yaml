@@ -1,0 +1,7 @@
+{{- /*
+press's, herald's and desk's ServiceAccounts and roles, and the roles people
+are given (manifesto-proofreader, -editor, -publisher), generated from
+config/rbac. desk's ServiceAccount has no permissions: desk acts with each
+user's own token.
+*/ -}}
+{{ include "manifesto.generated" (list $ "files/rbac.yaml" dict) }}

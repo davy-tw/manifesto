@@ -1,0 +1,25 @@
+# herald only reads: it never writes any resource.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: herald
+    app.kubernetes.io/managed-by: kustomize
+  name: herald-role
+rules:
+- apiGroups:
+  - manifesto.davy.tw
+  resources:
+  - gazettes
+  - dispatches
+  - scribes
+  - sections
+  - stamps
+  - typesets
+  - clustertypesets
+  - prints
+  verbs:
+  - get
+  - list
+  - watch

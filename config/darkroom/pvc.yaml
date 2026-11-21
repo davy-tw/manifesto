@@ -1,0 +1,16 @@
+# darkroom's storage for pvc Archives. Without storageClassName it uses the
+# cluster default (local-path on k3s, which is ReadWriteOnce).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: darkroom
+    app.kubernetes.io/managed-by: kustomize
+  name: media-data
+  namespace: system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi

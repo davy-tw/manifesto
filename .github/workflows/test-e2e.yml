@@ -1,0 +1,53 @@
+name: E2E Tests
+
+on:
+  push:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  test-e2e:
+    permissions:
+      contents: read
+    name: Run on ${{ matrix.provider }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # kind: upstream Kubernetes. k3d: k3s with its bundled Traefik, the
+        # first production target (docs/k3s.md), including gateway routing.
+        provider: [kind, k3d]
+    env:
+      K3D_VERSION: v5.9.0
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: .go-version
+
+      - name: Install the latest version of kind
+        if: matrix.provider == 'kind'
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: Install k3d
+        if: matrix.provider == 'k3d'
+        run: |
+          curl -fsSLo ./k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-$(go env GOARCH)"
+          chmod +x ./k3d
+          sudo mv ./k3d /usr/local/bin/k3d
+          k3d version
+
+      - name: Running Test e2e
+        run: |
+          go mod tidy
+          if [ "${{ matrix.provider }}" = k3d ]; then make test-e2e-k3d; else make test-e2e; fi
