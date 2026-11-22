@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,11 @@ type fakeIssuer struct {
 	issued  int
 	current string // the refresh token that is still valid
 	reused  int    // refresh tokens presented a second time
+	// failNext makes the next refresh grant fail with this status, without
+	// using up the refresh token, as a provider outage would.
+	failNext int
+	// noIDToken leaves the ID token out of refresh responses.
+	noIDToken bool
 }
 
 func newFakeIssuer(t *testing.T) *fakeIssuer {
@@ -105,6 +111,12 @@ func startFakeIssuer() (*fakeIssuer, error) {
 			}
 			delete(f.codes, r.Form.Get("code"))
 		case "refresh_token":
+			if f.failNext != 0 {
+				code := f.failNext
+				f.failNext = 0
+				http.Error(w, `{"error":"server_error"}`, code)
+				return
+			}
 			if rt := r.Form.Get("refresh_token"); rt != f.current || rt == "" {
 				f.reused++
 				f.current = "" // revoke the chain
@@ -119,10 +131,14 @@ func startFakeIssuer() (*fakeIssuer, error) {
 			nonce = f.nonce
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		resp := map[string]any{
 			"access_token": "at", "token_type": "Bearer", "expires_in": 3600,
 			"refresh_token": f.current, "id_token": f.idToken(nonce),
-		})
+		}
+		if f.noIDToken && r.Form.Get("grant_type") == "refresh_token" {
+			delete(resp, "id_token")
+		}
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	return f, nil
 }
@@ -368,6 +384,46 @@ func TestSessionRefresh(t *testing.T) {
 	}
 	if code := b.refresh(a); code != http.StatusUnauthorized {
 		t.Errorf("refreshing it = %d, want 401", code)
+	}
+}
+
+// A provider that fails for a while must not sign the user out; one that
+// refuses the refresh token, or answers without an ID token, does.
+func TestRefreshFailures(t *testing.T) {
+	issuer := newFakeIssuer(t)
+	issuer.lifetime = 3 * time.Second
+	a := newAuth(t, issuer)
+	b := signIn(t, issuer, a)
+
+	for _, code := range []int{http.StatusInternalServerError, http.StatusTooManyRequests} {
+		issuer.failNext = code
+		if got := b.refresh(a); got != http.StatusServiceUnavailable {
+			t.Errorf("provider answered %d: refresh = %d, want 503", code, got)
+		}
+		if _, ok := b.cookies[sessionCookie]; !ok {
+			t.Fatalf("provider answered %d: the session cookie was cleared", code)
+		}
+	}
+	if got := b.refresh(a); got != http.StatusNoContent || issuer.reused != 0 {
+		t.Fatalf("retry = %d, reused %d", got, issuer.reused)
+	}
+
+	issuer.noIDToken = true
+	resp := refreshWith(a, b.cookies)
+	msg, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusUnauthorized || !strings.Contains(string(msg), "no ID token") {
+		t.Errorf("refresh without an ID token = %d %s", resp.StatusCode, msg)
+	}
+	issuer.noIDToken = false
+
+	// A refused refresh token ends the session.
+	b2 := signIn(t, issuer, a)
+	issuer.current = "revoked-elsewhere"
+	if got := b2.refresh(a); got != http.StatusUnauthorized {
+		t.Errorf("refused refresh token: refresh = %d, want 401", got)
+	}
+	if _, ok := b2.cookies[sessionCookie]; ok {
+		t.Error("a refused refresh token kept the session")
 	}
 }
 

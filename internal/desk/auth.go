@@ -292,6 +292,9 @@ func (a *Auth) Logout(w http.ResponseWriter, r *http.Request) {
 // errNoSession means the request carries no usable session.
 var errNoSession = errors.New("not signed in")
 
+// errInvalidIDToken: a refresh returned an ID token that does not verify.
+var errInvalidIDToken = errors.New("invalid ID token on refresh")
+
 // errSessionExpired means the session's ID token expired but it has a
 // refresh token: the browser should POST /auth/refresh and try again.
 var errSessionExpired = errors.New("session expired; refresh it")
@@ -339,8 +342,14 @@ func (a *Auth) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	fresh, err := a.refresh(r, s.RefreshToken)
 	if err != nil {
+		if !sessionIsOver(err) {
+			// The provider failed or could not be reached; the refresh
+			// token may still be good, so keep the session for a retry.
+			http.Error(w, "renewing the session failed; try again", http.StatusServiceUnavailable)
+			return
+		}
 		a.sealer.ClearCookie(w, r, sessionCookie, a.sessionOptions())
-		http.Error(w, errNoSession.Error(), http.StatusUnauthorized)
+		http.Error(w, errNoSession.Error()+": "+err.Error(), http.StatusUnauthorized)
 		return
 	}
 	if err := a.sealer.SetCookie(w, r, sessionCookie, fresh, a.sessionOptions()); err != nil {
@@ -348,6 +357,28 @@ func (a *Auth) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// errNoIDToken: the provider answered a refresh without an ID token, which
+// OIDC allows but desk cannot use, since the ID token is what it forwards.
+var errNoIDToken = errors.New("the provider returned no ID token on refresh; " +
+	"desk needs one (check the provider's client settings)")
+
+// sessionIsOver reports whether a failed refresh ended the session: the
+// provider refused the refresh token, or answered with something desk
+// cannot use. Anything else (5xx, timeouts, network errors) may pass.
+func sessionIsOver(err error) bool {
+	if re, ok := errors.AsType[*oauth2.RetrieveError](err); ok {
+		if re.ErrorCode == "invalid_grant" {
+			return true
+		}
+		code := 0
+		if re.Response != nil {
+			code = re.Response.StatusCode
+		}
+		return code >= 400 && code < 500 && code != http.StatusTooManyRequests
+	}
+	return errors.Is(err, errNoIDToken) || errors.Is(err, errInvalidIDToken)
 }
 
 // refresh exchanges refreshToken at most once per refreshGrace in this
@@ -369,9 +400,12 @@ func (a *Auth) refresh(r *http.Request, refreshToken string) (*Session, error) {
 		if err != nil {
 			return nil, err
 		}
+		if raw, _ := tok.Extra("id_token").(string); raw == "" {
+			return nil, errNoIDToken
+		}
 		fresh, err := a.session(ctx, tok, "")
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", errInvalidIDToken, err)
 		}
 		if fresh.RefreshToken == "" {
 			// The provider does not rotate refresh tokens.
