@@ -131,7 +131,7 @@ darkroom:
     enabled: true          # 把媒體網域掛到同一個 Gateway（第 7 步）
 ```
 
-`desk.route` 與 `darkroom.route` 會在 `manifesto-system` 建立 HTTPRoute，hostname 取自各自的 `publicURL`，掛到 `press.routing` 指定的 Gateway 與 listener，跟 press 替 Gazette 建的一樣。兩個網域都要在 Gateway listener 的 hostname 範圍內（這裡是 `*.blog.example.io`）。Gazette 不要建在 `manifesto-system`：名為 `desk` 或 `darkroom` 的 Gazette 會跟這兩條路由同名。
+`desk.route` 與 `darkroom.route` 會在 `manifesto-system` 建立 HTTPRoute，hostname 取自各自的 `publicURL`，掛到 `press.routing` 指定的 Gateway 與 listener，跟 press 替 Gazette 建的一樣。兩個網域都要在 Gateway listener 的 hostname 範圍內（這裡是 `*.blog.example.io`）。Gazette 不要建在 `manifesto-system`：名為 `desk` 或 `darkroom` 的 Gazette 會跟這兩條路由同名。chart 會把 desk 與 `darkroom.publicURL` 的網域傳給 press（`--reserved-domains`），其他 namespace 的 Gazette 宣告這些網域時會回報 `DomainReserved`，不會建立路由。
 
 ```sh
 kubectl create namespace manifesto-system

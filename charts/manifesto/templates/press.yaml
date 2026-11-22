@@ -50,6 +50,16 @@ spec:
         {{- if not .Values.desk.enabled }}
         - --desk-session-secret=
         {{- end }}
+        {{- $reserved := list }}
+        {{- if and .Values.desk.enabled .Values.desk.publicURL }}
+        {{- $reserved = append $reserved (include "manifesto.host" .Values.desk.publicURL) }}
+        {{- end }}
+        {{- if and .Values.darkroom.enabled .Values.darkroom.publicURL }}
+        {{- $reserved = append $reserved (include "manifesto.host" .Values.darkroom.publicURL) }}
+        {{- end }}
+        {{- with compact $reserved }}
+        - --reserved-domains={{ . | join "," | lower }}
+        {{- end }}
         {{- with $r.gatewayName }}
         - --gateway-name={{ . }}
         - --gateway-namespace={{ required "press.routing.gatewayNamespace is required with gatewayName" $r.gatewayNamespace }}

@@ -57,7 +57,7 @@ helm install manifesto oci://ghcr.io/davy-tw/charts/manifesto --version <X.Y.Z> 
 | `press.editions`、`press.editionBytes` | 每篇保留的 Edition 數與內容總量上限（預設 20 版、2Mi），避免修訂版本塞滿 etcd |
 | `darkroom.enabled`、`darkroom.persistence.*` | 媒體（pvc Archive）與它的 PVC；全部用 S3 時可以關掉 |
 | `desk.publicURL`、`desk.oidc.*`、`desk.tokenSignIn` | desk 的網址與登入方式 |
-| `desk.route.*`、`darkroom.publicURL`、`darkroom.route.*` | 選用：把 desk 與媒體網域掛到 `press.routing` 的 Gateway，建立的物件跟 press 替 Gazette 建的相同；`route.parentRefs` 改掛到指定的位置 |
+| `desk.route.*`、`darkroom.publicURL`、`darkroom.route.*` | 選用：把 desk 與媒體網域掛到 `press.routing` 的 Gateway，建立的物件跟 press 替 Gazette 建的相同；`route.parentRefs` 改掛到指定的位置。`listenerset` 模式下 `publicURL` 必須是 `https://`。不論是否開啟，desk 與 darkroom 的 `publicURL` 網域都會傳給 press 保留，宣告這些網域的 Gazette 會回報 `DomainReserved` |
 
 一個叢集只安裝一次：press 管理所有 namespace，角色名稱（`manifesto-editor` 等）也是固定的。CRD 與媒體的 PVC 在 `helm uninstall` 時保留，因為刪掉 CRD 會刪掉所有文章。
 
@@ -158,7 +158,7 @@ press 第一次啟動會在 `manifesto-system` 建立簽章用的 Secret `manife
 `listenerset` 模式的需求：
 
 - Gateway API v1.6 以上的標準 CRD（含 `ListenerSet`），以及支援 ListenerSet 的 Gateway 實作
-- 共用的 Gateway 要允許 Gazette 所在 namespace 的 ListenerSet，例如 `spec.allowedListeners.namespaces.from: All`
+- 共用的 Gateway 要允許 Gazette 所在 namespace 的 ListenerSet，例如 `spec.allowedListeners.namespaces.from: All`；開啟 `desk.route` 或 `darkroom.route` 時，chart 的 ListenerSet 建在 release namespace（例如 `manifesto-system`），這個 namespace 也要被允許
 - 用 cert-manager 時建議 DNS-01 的 ClusterIssuer（HTTP-01 要額外設定才能經過每個 ListenerSet）
 
 press 會在 Gazette 的 namespace 建立 `manifesto-<gazette>` 的 ListenerSet、HTTPRoute（以及 HTTP 轉 HTTPS 的 `-redirect`）和 Certificate，並在 herald 的 namespace 建立 ReferenceGrant。`kubectl get blog` 的 `Routed` condition 會顯示 Gateway 是否已經接手。

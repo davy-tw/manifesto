@@ -18,11 +18,14 @@ With route.parentRefs only the HTTPRoute is created, attached there.
 {{- $r := $root.Values.press.routing -}}
 {{- $ns := $root.Release.Namespace -}}
 {{- $name := printf "manifesto-%s" $component -}}
-{{- $host := regexReplaceAll ":[0-9]+$" (urlParse $url).host "" -}}
+{{- $host := include "manifesto.host" $url -}}
 {{- if not $host }}{{ fail (printf "%s.route needs a publicURL with a hostname, got %q" $component $url) }}{{ end -}}
+{{- if ne $host (lower $host) }}{{ fail (printf "%s.route needs a lower-case hostname in publicURL, got %q" $component $host) }}{{ end -}}
 {{- if and (not $route.parentRefs) (not $r.gatewayName) }}{{ fail (printf "%s.route needs press.routing.gatewayName, or %s.route.parentRefs" $component $component) }}{{ end -}}
-{{- $gatewayNS := default $ns $r.gatewayNamespace -}}
+{{- /* press.yaml requires gatewayNamespace along with gatewayName. */ -}}
+{{- $gatewayNS := $r.gatewayNamespace -}}
 {{- $listenerSet := and (not $route.parentRefs) (ne $r.mode "gateway") -}}
+{{- if and $listenerSet (ne (urlParse $url).scheme "https") }}{{ fail (printf "%s.route in listenerset mode serves HTTPS and redirects HTTP to it, so publicURL must be https://, got %q" $component $url) }}{{ end -}}
 {{- $labels := include "manifesto.componentLabels" (list $root $component) -}}
 {{- if $listenerSet }}
 ---

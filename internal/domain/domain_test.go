@@ -76,3 +76,18 @@ func TestNormalize(t *testing.T) {
 		}
 	}
 }
+
+func TestSet(t *testing.T) {
+	s := NewSet([]string{"Desk.Example.io", " media.example.io:443 ", ""})
+	for dom, want := range map[string]bool{
+		"desk.example.io":  true,
+		"DESK.example.io.": true,
+		"media.example.io": true,
+		"blog.example.io":  false,
+		"":                 false,
+	} {
+		if got := s.Has(dom); got != want {
+			t.Errorf("Has(%q) = %v, want %v", dom, got, want)
+		}
+	}
+}

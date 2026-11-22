@@ -400,6 +400,32 @@ func TestChartRoutes(t *testing.T) {
 		}
 	})
 
+	t.Run("reserves the hostnames", func(t *testing.T) {
+		for _, tc := range []struct {
+			set  []string
+			want string
+		}{
+			{[]string{"desk.publicURL=https://Desk.example.io:8443", "darkroom.publicURL=https://media.example.io"},
+				"--reserved-domains=desk.example.io,media.example.io"},
+			{[]string{"desk.publicURL=https://desk.example.io"}, "--reserved-domains=desk.example.io"},
+			{[]string{"desk.enabled=false", "darkroom.enabled=false", "darkroom.publicURL=https://media.example.io"}, ""},
+		} {
+			objs, err := helmTemplate(t, tc.set...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			for _, a := range args(t, objs, "manifesto-controller-manager") {
+				if strings.HasPrefix(a, "--reserved-domains") {
+					got = a
+				}
+			}
+			if got != tc.want {
+				t.Errorf("%v: press arg = %q, want %q", tc.set, got, tc.want)
+			}
+		}
+	})
+
 	t.Run("not without darkroom", func(t *testing.T) {
 		objs, err := helmTemplate(t, "desk.publicURL=https://d", "darkroom.enabled=false",
 			"darkroom.route.enabled=true", "press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra")
@@ -422,6 +448,10 @@ func TestChartRoutes(t *testing.T) {
 			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "darkroom.publicURL is required"},
 		{"needs a hostname", []string{"desk.publicURL=desk", "desk.route.enabled=true",
 			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "needs a publicURL with a hostname"},
+		{"needs https for a ListenerSet", []string{"desk.publicURL=http://d.example.io", "desk.route.enabled=true",
+			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "publicURL must be https://"},
+		{"needs a lower-case hostname", []string{"desk.publicURL=https://D.example.io", "desk.route.enabled=true",
+			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "needs a lower-case hostname"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := helmTemplate(t, tc.set...); err == nil || !strings.Contains(err.Error(), tc.want) {

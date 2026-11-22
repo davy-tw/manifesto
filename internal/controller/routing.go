@@ -102,16 +102,20 @@ var certificateGVK = schema.GroupVersionKind{Group: "cert-manager.io", Version: 
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;patch;delete
 
 // reconcileRouting applies or removes the routing objects of g, and reports
-// them in the Routed condition. Only the Gazette that owns its domain is
-// routed.
-func (r *GazetteReconciler) reconcileRouting(ctx context.Context, g *v1.Gazette, ownsDomain bool) (metav1.Condition, error) {
+// them in the Routed condition. Only a Gazette that may serve its domain is
+// routed: claim is the reason it may not (DomainConflict or DomainReserved),
+// empty when it may.
+func (r *GazetteReconciler) reconcileRouting(ctx context.Context, g *v1.Gazette, claim string) (metav1.Condition, error) {
 	cond := metav1.Condition{Type: v1.ConditionRouted, ObservedGeneration: g.Generation}
-	if !ownsDomain {
+	if claim != "" {
 		if err := r.deleteRouting(ctx, g); err != nil {
 			return cond, err
 		}
-		cond.Status, cond.Reason = metav1.ConditionFalse, v1.ReasonDomainConflict
+		cond.Status, cond.Reason = metav1.ConditionFalse, claim
 		cond.Message = "Not routed: another Gazette serves this domain"
+		if claim == v1.ReasonDomainReserved {
+			cond.Message = "Not routed: the domain is reserved for Manifesto's own components"
+		}
 		return cond, nil
 	}
 	route := r.httpRoute(g)

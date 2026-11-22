@@ -237,10 +237,10 @@ press 不產生渲染結果，但會用共用的 `internal/render` 試渲染一�
 
 **Gazette reconcile**
 
-- 不同 namespace 的 Gazette 搶同一個網域時，最早建立的生效，其他的把 status 設成 `DomainConflict`；同時間建立的依 namespace、名稱排序。規則放在 `internal/domain`，press 與 herald 共用
+- 不同 namespace 的 Gazette 搶同一個網域時，最早建立的生效，其他的把 status 設成 `DomainConflict`；同時間建立的依 namespace、名稱排序。規則放在 `internal/domain`，press 與 herald 共用。desk 與 darkroom 的網域由 chart 以 `--reserved-domains` 傳給 press，宣告這些網域的 Gazette 一律回報 `DomainReserved`，不會建立路由
 - 主題：`typesetRef` 找不到時 `Ready` 為 `TypesetNotFound`，暫用內建主題；解析失敗為 `TemplateError`
 - **路由**（press 以 `--gateway-name`/`--gateway-namespace` 啟用，未設定就交給叢集管理者）有兩種模式。`gateway` 模式只建立掛到共用 Gateway 的 HTTPRoute（加上 ReferenceGrant），listener 與 TLS 由叢集管理者負責，適用於不支援 ListenerSet 的實作，例如 k3s 內建的 Traefik（見 `docs/k3s.md`）。預設的 `listenerset` 模式下，擁有網域的 Gazette 在自己的 namespace 得到以下物件，全部以 ownerReference 掛在 Gazette 下，刪除時由 K8s 回收，不需要 finalizer：
-  - `ListenerSet` `manifesto-<gazette>`：掛到共用 Gateway，含該網域的 HTTPS（預設 443）與 HTTP（預設 80）listener，port 可用參數調整。Gateway 必須以 `spec.allowedListeners` 允許這些 namespace
+  - `ListenerSet` `manifesto-<gazette>`：掛到共用 Gateway，含該網域的 HTTPS（預設 443）與 HTTP（預設 80）listener，port 可用參數調整。Gateway 必須以 `spec.allowedListeners` 允許這些 namespace（開啟 chart 的 desk／darkroom 路由時還有 release namespace）
   - `HTTPRoute` `manifesto-<gazette>`：HTTPS listener 的流量導向 herald；`manifesto-<gazette>-redirect`：HTTP 以 301 轉址到 HTTPS
   - cert-manager `Certificate` `manifesto-<gazette>`（設定 `--cluster-issuer` 時）：簽發 Secret `manifesto-<gazette>-tls`。HTTP-01 驗證要經過每個 ListenerSet，建議用 DNS-01 的 ClusterIssuer
   - herald 所在 namespace 的 `ReferenceGrant` `manifesto-<namespace>`：允許該 namespace 的 HTTPRoute 指向 herald 的 Service；namespace 沒有 Gazette 時移除
@@ -354,7 +354,7 @@ status:
 ## 安裝
 
 - Helm chart `charts/manifesto` 與 kustomize `config/default` 建立相同的資源與名稱（`manifesto-*`），一個叢集裝一次
-- chart 可選擇性地替 desk 與 darkroom 的公開 port 建立路由（`desk.route`、`darkroom.route`，hostname 取自各自的 `publicURL`）：掛到 press 使用的 Gateway，物件與 press 替同名 Gazette 建的相同（`gateway` 模式一條 HTTPRoute；`listenerset` 模式加上 ListenerSet、轉址 HTTPRoute 與選用的 Certificate），`test/chart` 以 `controller.RoutingObjects` 比對兩者。預設關閉。Gateway 本身與 ClusterArchive 仍由叢集管理者建立（chart 的 CRD 在 templates 裡，首次安裝時無法同時建立 CR）
+- chart 可選擇性地替 desk 與 darkroom 的公開 port 建立路由（`desk.route`、`darkroom.route`，hostname 取自各自的 `publicURL`）：掛到 press 使用的 Gateway，物件與 press 替同名 Gazette 建的相同（`gateway` 模式一條 HTTPRoute；`listenerset` 模式加上 ListenerSet、轉址 HTTPRoute 與選用的 Certificate），`test/chart` 以 `controller.RoutingObjects` 比對兩者。預設關閉。`listenerset` 模式下這些 ListenerSet 建在 release namespace，Gateway 的 `spec.allowedListeners` 也要允許它。desk 與 darkroom 的 `publicURL` 網域（不論路由是否由 chart 建立）以 `--reserved-domains` 傳給 press，避免租戶的 Gazette 搶走這些網域。Gateway 本身與 ClusterArchive 仍由叢集管理者建立（chart 的 CRD 在 templates 裡，首次安裝時無法同時建立 CR）
 - chart 的 CRD 與 RBAC 不手寫：`make chart` 從 kustomize 的輸出產生 `charts/manifesto/files/`，CI 檢查有沒有過期；`test/chart` 比對兩者的物件、CRD、RBAC 與 Pod 設定
 - CRD 放在 templates（不是 `crds/`），升級時才會更新；CRD 和媒體 PVC 加上 `helm.sh/resource-policy: keep`
 - k3d 的 E2E 用 Helm 安裝（gateway 模式），Kind 的 E2E 用 kustomize

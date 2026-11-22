@@ -53,3 +53,24 @@ func Normalize(host string) string {
 	}
 	return strings.TrimSuffix(host, ".")
 }
+
+// Set is a set of normalized domains.
+type Set map[string]struct{}
+
+// NewSet returns the set of the given domains, normalized; empty ones are
+// skipped.
+func NewSet(domains []string) Set {
+	s := Set{}
+	for _, d := range domains {
+		if d = Normalize(strings.TrimSpace(d)); d != "" {
+			s[d] = struct{}{}
+		}
+	}
+	return s
+}
+
+// Has reports whether domain, normalized, is in s.
+func (s Set) Has(domain string) bool {
+	_, ok := s[Normalize(domain)]
+	return ok
+}
