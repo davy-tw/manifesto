@@ -92,7 +92,18 @@ func TestUI(t *testing.T) {
 		Spec: v1.ArchiveSpec{PVC: &v1.PVCArchiveSource{ClaimName: "manifesto-media-data", PublicURL: media.URL}}}
 	mustCreate(ca, func() error { return admin.Create(ctx, ca) })
 
-	// desk, signing in with the fake issuer the API server trusts.
+	// desk, signing in with the fake issuer the API server trusts. Its ID
+	// tokens live for 10s, so desk asks the browser to refresh every few
+	// seconds while the UI makes parallel requests and watches; the issuer
+	// revokes the session if a refresh token is ever used twice.
+	issuer.mu.Lock()
+	issuer.lifetime = 10 * time.Second
+	issuer.mu.Unlock()
+	t.Cleanup(func() {
+		issuer.mu.Lock()
+		issuer.lifetime = time.Hour
+		issuer.mu.Unlock()
+	})
 	srv := httptest.NewUnstartedServer(nil)
 	srv.Start()
 	t.Cleanup(srv.Close)
@@ -143,5 +154,10 @@ func TestUI(t *testing.T) {
 		}
 	case <-time.After(3 * time.Minute):
 		t.Fatal("UI script timed out")
+	}
+	issuer.mu.Lock()
+	defer issuer.mu.Unlock()
+	if issuer.reused != 0 || issuer.refresh == 0 {
+		t.Errorf("refresh grants = %d, reused refresh tokens = %d; want refreshes and no reuse", issuer.refresh, issuer.reused)
 	}
 }

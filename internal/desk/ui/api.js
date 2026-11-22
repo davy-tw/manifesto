@@ -12,15 +12,47 @@ export class APIError extends Error {
   }
 }
 
+// refreshing is the one POST /auth/refresh in flight. Every request that
+// finds the session expired waits for it instead of refreshing on its own:
+// identity providers that rotate refresh tokens end the whole session when
+// one refresh token is used twice. A Web Lock does the same across tabs,
+// which share the cookie: a tab that refreshes after another one sends the
+// renewed cookie, and desk does not refresh it again.
+let refreshing = null;
+
+function refreshSession() {
+  const post = () =>
+    fetch('/auth/refresh', {
+      method: 'POST',
+      headers: { 'X-Manifesto-Desk': '1' },
+      credentials: 'same-origin',
+    }).then((res) => res.ok);
+  refreshing ??= (navigator.locks ? navigator.locks.request('manifesto-desk-refresh', post) : post())
+    .catch(() => false)
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+
+// send is fetch with the session cookie. When desk says the session
+// expired, it renews the session once and sends the request again.
+async function send(path, init) {
+  const req = { ...init, credentials: 'same-origin' };
+  const res = await fetch(path, req);
+  if (res.status !== 401 || !res.headers.get('X-Manifesto-Desk-Refresh')) return res;
+  if (!(await refreshSession())) return res;
+  return fetch(path, req);
+}
+
 async function call(method, path, { body, contentType } = {}) {
   const headers = { Accept: 'application/json' };
   // desk refuses state changes without this header (CSRF protection).
   if (method !== 'GET') headers['X-Manifesto-Desk'] = '1';
   if (body !== undefined) headers['Content-Type'] = contentType || 'application/json';
-  const res = await fetch(path, {
+  const res = await send(path, {
     method,
     headers,
-    credentials: 'same-origin',
     body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
   });
   if (!res.ok) {
@@ -79,7 +111,7 @@ export async function watch(ns, plural, onEvent, signal, { name } = {}) {
     if (rv) q.set('resourceVersion', rv);
     if (name) q.set('fieldSelector', `metadata.name=${name}`);
     try {
-      const res = await fetch(`${collection(ns, plural)}?${q}`, { credentials: 'same-origin', signal });
+      const res = await send(`${collection(ns, plural)}?${q}`, { signal });
       if (!res.ok) throw new APIError(res.status, await res.text());
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

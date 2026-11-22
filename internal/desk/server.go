@@ -10,6 +10,7 @@ SPDX-License-Identifier: MIT
 package desk
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -60,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.Auth != nil {
 		mux.Handle("POST /auth/logout", s.guard(http.HandlerFunc(s.Auth.Logout)))
+		mux.Handle("POST /auth/refresh", s.guard(http.HandlerFunc(s.Auth.Refresh)))
 	}
 	mux.Handle("GET /api/session", s.withToken(s.session))
 	mux.Handle("POST /api/preview", s.withToken(s.preview))
@@ -74,6 +76,13 @@ func (s *Server) Handler() http.Handler {
 }
 
 type tokenKey struct{}
+
+// sessionKey holds the cookie session withToken resolved.
+type sessionKey struct{}
+
+// RefreshHeader is set on a 401 when the session can be renewed with
+// POST /auth/refresh.
+const RefreshHeader = "X-Manifesto-Desk-Refresh"
 
 func tokenOf(r *http.Request) string {
 	t, _ := r.Context().Value(tokenKey{}).(string)
@@ -94,8 +103,13 @@ func (s *Server) withToken(h func(http.ResponseWriter, *http.Request, string)) h
 				return
 			}
 			if s.Auth != nil {
-				if sess, err := s.Auth.Session(w, r); err == nil {
+				sess, err := s.Auth.Session(r)
+				if errors.Is(err, errSessionExpired) {
+					w.Header().Set(RefreshHeader, "1")
+				}
+				if err == nil {
 					token = sess.Token
+					r = r.WithContext(context.WithValue(r.Context(), sessionKey{}, sess))
 				}
 			}
 		}
@@ -156,10 +170,8 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, token string) {
 		return
 	}
 	info := SessionInfo{Username: review.Status.UserInfo.Username, Groups: review.Status.UserInfo.Groups}
-	if s.Auth != nil {
-		if sess, err := s.Auth.Session(w, r); err == nil {
-			info.Name = sess.Name
-		}
+	if sess, ok := r.Context().Value(sessionKey{}).(*Session); ok {
+		info.Name = sess.Name
 	}
 	writeJSON(w, info)
 }

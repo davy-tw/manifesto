@@ -11,6 +11,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +39,11 @@ type fakeIssuer struct {
 	lifetime time.Duration
 	nonce    string // overrides the nonce put in ID tokens when set
 	refresh  int    // refresh grants served
+	// The issuer rotates refresh tokens with reuse detection: each is
+	// accepted once, and using one again revokes the whole chain.
+	issued  int
+	current string // the refresh token that is still valid
+	reused  int    // refresh tokens presented a second time
 }
 
 func newFakeIssuer(t *testing.T) *fakeIssuer {
@@ -98,15 +105,23 @@ func startFakeIssuer() (*fakeIssuer, error) {
 			}
 			delete(f.codes, r.Form.Get("code"))
 		case "refresh_token":
+			if rt := r.Form.Get("refresh_token"); rt != f.current || rt == "" {
+				f.reused++
+				f.current = "" // revoke the chain
+				http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
+				return
+			}
 			f.refresh++
 		}
+		f.issued++
+		f.current = fmt.Sprintf("rt-%d", f.issued)
 		if f.nonce != "" {
 			nonce = f.nonce
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "at", "token_type": "Bearer", "expires_in": 3600,
-			"refresh_token": "rt", "id_token": f.idToken(nonce),
+			"refresh_token": f.current, "id_token": f.idToken(nonce),
 		})
 	})
 	return f, nil
@@ -209,12 +224,7 @@ func sessionOf(t *testing.T, a *Auth, b *browser) (*Session, error) {
 	for _, c := range b.cookies {
 		req.AddCookie(c)
 	}
-	rec := httptest.NewRecorder()
-	s, err := a.Session(rec, req)
-	for _, c := range rec.Result().Cookies() {
-		b.cookies[c.Name] = c
-	}
-	return s, err
+	return a.Session(req)
 }
 
 func TestSignIn(t *testing.T) {
@@ -233,7 +243,7 @@ func TestSignIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Name != "Alice" || s.Token == "" || s.RefreshToken != "rt" {
+	if s.Name != "Alice" || s.Token == "" || s.RefreshToken != "rt-1" {
 		t.Errorf("session = %+v", s)
 	}
 }
@@ -279,19 +289,67 @@ func TestSignInRejectsWrongNonce(t *testing.T) {
 	}
 }
 
+// refreshWith POSTs /auth/refresh with cookies and returns the response.
+func refreshWith(a *Auth, cookies map[string]*http.Cookie) *http.Response {
+	req := httptest.NewRequest(http.MethodPost, "http://desk/auth/refresh", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	a.Refresh(rec, req)
+	return rec.Result()
+}
+
+func (b *browser) refresh(a *Auth) int {
+	resp := refreshWith(a, b.cookies)
+	for _, c := range resp.Cookies() {
+		if c.MaxAge < 0 {
+			delete(b.cookies, c.Name)
+		} else {
+			b.cookies[c.Name] = c
+		}
+	}
+	return resp.StatusCode
+}
+
 func TestSessionRefresh(t *testing.T) {
 	issuer := newFakeIssuer(t)
-	issuer.lifetime = 10 * time.Second // already inside the 30s refresh window
+	issuer.lifetime = 3 * time.Second // already about to expire
 	a := newAuth(t, issuer)
 	b := signIn(t, issuer, a)
 	first := b.cookies[sessionCookie].Value
 
+	// Session does not refresh: it asks the browser to.
+	if _, err := sessionOf(t, a, b); !errors.Is(err, errSessionExpired) {
+		t.Fatalf("Session of an expired ID token = %v, want errSessionExpired", err)
+	}
+	// Tokens from now on are still usable but inside the refresh window.
+	issuer.lifetime = 20 * time.Second
+	if code := b.refresh(a); code != http.StatusNoContent {
+		t.Fatalf("refresh = %d", code)
+	}
 	s, err := sessionOf(t, a, b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if issuer.refresh != 1 || b.cookies[sessionCookie].Value == first || s.Token == "" {
 		t.Errorf("refreshes = %d; the session cookie must be replaced", issuer.refresh)
+	}
+	// The rotated refresh token is the one kept, so the next refresh works.
+	if s.RefreshToken != "rt-2" {
+		t.Errorf("refresh token = %q, want the rotated rt-2", s.RefreshToken)
+	}
+	if code := b.refresh(a); code != http.StatusNoContent || issuer.refresh != 2 || issuer.reused != 0 {
+		t.Errorf("second refresh = %d, grants %d, reused %d", code, issuer.refresh, issuer.reused)
+	}
+
+	// A session that does not expire soon is not refreshed.
+	issuer.lifetime = time.Hour
+	if code := b.refresh(a); code != http.StatusNoContent {
+		t.Fatal(code)
+	}
+	if code := b.refresh(a); code != http.StatusNoContent || issuer.refresh != 3 {
+		t.Errorf("refreshing a fresh session: %d, grants %d", code, issuer.refresh)
 	}
 
 	// Without a refresh token an expired session is over.
@@ -305,8 +363,54 @@ func TestSessionRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.cookies[sessionCookie] = rec.Result().Cookies()[0]
-	if _, err := sessionOf(t, a, b); err == nil {
-		t.Error("an expired session without refresh token was accepted")
+	if _, err := sessionOf(t, a, b); !errors.Is(err, errNoSession) {
+		t.Errorf("an expired session without refresh token: %v", err)
+	}
+	if code := b.refresh(a); code != http.StatusUnauthorized {
+		t.Errorf("refreshing it = %d, want 401", code)
+	}
+}
+
+// Requests that carry the same expired cookie, at once or just after the
+// refresh, must not present its refresh token to the provider twice.
+func TestConcurrentRefreshUsesTheRefreshTokenOnce(t *testing.T) {
+	issuer := newFakeIssuer(t)
+	issuer.lifetime = 3 * time.Second
+	a := newAuth(t, issuer)
+	b := signIn(t, issuer, a)
+	stale := maps.Clone(b.cookies)
+
+	var wg sync.WaitGroup
+	results := make([]*http.Response, 8, 9)
+	for i := range results {
+		wg.Go(func() { results[i] = refreshWith(a, stale) })
+	}
+	wg.Wait()
+	// One more, after the others finished, still with the old cookie.
+	results = append(results, refreshWith(a, stale))
+
+	tokens := make([]string, 0, len(results))
+	for _, resp := range results {
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("refresh = %d", resp.StatusCode)
+		}
+		var s Session
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		for _, c := range resp.Cookies() {
+			req.AddCookie(c)
+		}
+		if err := a.sealer.ReadCookie(req, sessionCookie, &s); err != nil {
+			t.Fatal(err)
+		}
+		tokens = append(tokens, s.RefreshToken)
+	}
+	if issuer.refresh != 1 || issuer.reused != 0 {
+		t.Errorf("grants = %d, reused = %d; want one grant", issuer.refresh, issuer.reused)
+	}
+	for _, rt := range tokens {
+		if rt != "rt-2" {
+			t.Errorf("a request got refresh token %q, want rt-2", rt)
+		}
 	}
 }
 

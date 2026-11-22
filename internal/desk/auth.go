@@ -9,16 +9,19 @@ package desk
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/singleflight"
 )
 
 // Cookie names.
@@ -58,7 +61,31 @@ type Auth struct {
 	tokens   bool
 	// SessionMaxAge bounds how long a session cookie lives (default 12h).
 	SessionMaxAge time.Duration
+
+	// Refreshing: one refresh grant per refresh token, see Refresh.
+	refreshes singleflight.Group
+	mu        sync.Mutex
+	refreshed map[[sha256.Size]byte]refreshResult
 }
+
+// refreshResult is the session a refresh token was exchanged for, kept for
+// requests that still carry the old cookie.
+type refreshResult struct {
+	session *Session
+	until   time.Time
+}
+
+// Timing of sessions.
+const (
+	// refreshBefore is how long before the ID token expires Refresh renews it.
+	refreshBefore = 30 * time.Second
+	// expiryMargin: a token this close to expiry is not forwarded any more,
+	// so it does not run out on its way to the API server.
+	expiryMargin = 5 * time.Second
+	// refreshGrace is how long the outcome of a refresh is reused for
+	// requests that still carry the refresh token it consumed.
+	refreshGrace = 2 * time.Minute
+)
 
 // AuthConfig configures Auth.
 type AuthConfig struct {
@@ -265,32 +292,117 @@ func (a *Auth) Logout(w http.ResponseWriter, r *http.Request) {
 // errNoSession means the request carries no usable session.
 var errNoSession = errors.New("not signed in")
 
-// Session returns the request's session, refreshing an expired ID token
-// with the refresh token when there is one.
-func (a *Auth) Session(w http.ResponseWriter, r *http.Request) (*Session, error) {
+// errSessionExpired means the session's ID token expired but it has a
+// refresh token: the browser should POST /auth/refresh and try again.
+var errSessionExpired = errors.New("session expired; refresh it")
+
+// Session returns the request's session. It never refreshes: an ID token
+// is used until shortly before it expires, and then errSessionExpired asks
+// the browser to call Refresh. Refreshing on every request that finds the
+// token expired would send the same refresh token from several requests at
+// once, possibly to different desk replicas, and providers that rotate
+// refresh tokens revoke the whole session when one is used twice.
+func (a *Auth) Session(r *http.Request) (*Session, error) {
 	var s Session
 	if err := a.sealer.ReadCookie(r, sessionCookie, &s); err != nil {
 		return nil, errNoSession
 	}
-	if time.Until(s.Expiry) > 30*time.Second {
+	if time.Until(s.Expiry) > expiryMargin {
 		return &s, nil
 	}
 	if s.RefreshToken == "" || a.verifier == nil {
 		return nil, errNoSession
 	}
-	tok, err := a.oauth.TokenSource(a.ctx(r), &oauth2.Token{RefreshToken: s.RefreshToken}).Token()
-	if err != nil {
-		return nil, errNoSession
+	return nil, errSessionExpired
+}
+
+// Refresh renews the ID token with the refresh token once it is about to
+// expire, and stores the new refresh token the provider returns: a
+// provider that rotates refresh tokens accepts each one only once. The
+// browser calls it one request at a time. Requests that still carry a
+// refresh token being or just exchanged here share that exchange's result
+// instead of sending the token again.
+func (a *Auth) Refresh(w http.ResponseWriter, r *http.Request) {
+	var s Session
+	if err := a.sealer.ReadCookie(r, sessionCookie, &s); err != nil {
+		http.Error(w, errNoSession.Error(), http.StatusUnauthorized)
+		return
 	}
-	fresh, err := a.session(a.ctx(r), tok, "")
-	if err != nil {
-		return nil, errNoSession
+	if time.Until(s.Expiry) > refreshBefore {
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
-	if fresh.RefreshToken == "" {
-		fresh.RefreshToken = s.RefreshToken
+	if s.RefreshToken == "" || a.verifier == nil {
+		a.sealer.ClearCookie(w, r, sessionCookie, a.sessionOptions())
+		http.Error(w, errNoSession.Error(), http.StatusUnauthorized)
+		return
+	}
+	fresh, err := a.refresh(r, s.RefreshToken)
+	if err != nil {
+		a.sealer.ClearCookie(w, r, sessionCookie, a.sessionOptions())
+		http.Error(w, errNoSession.Error(), http.StatusUnauthorized)
+		return
 	}
 	if err := a.sealer.SetCookie(w, r, sessionCookie, fresh, a.sessionOptions()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// refresh exchanges refreshToken at most once per refreshGrace in this
+// process.
+func (a *Auth) refresh(r *http.Request, refreshToken string) (*Session, error) {
+	key := sha256.Sum256([]byte(refreshToken))
+	if s, ok := a.recentRefresh(key); ok {
+		return s, nil
+	}
+	v, err, _ := a.refreshes.Do(string(key[:]), func() (any, error) {
+		if s, ok := a.recentRefresh(key); ok {
+			return s, nil
+		}
+		// Not the request's context: a browser that gives up must not
+		// cancel an exchange the provider may already have completed.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(a.ctx(r)), 30*time.Second)
+		defer cancel()
+		tok, err := a.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}).Token()
+		if err != nil {
+			return nil, err
+		}
+		fresh, err := a.session(ctx, tok, "")
+		if err != nil {
+			return nil, err
+		}
+		if fresh.RefreshToken == "" {
+			// The provider does not rotate refresh tokens.
+			fresh.RefreshToken = refreshToken
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		now := time.Now()
+		if a.refreshed == nil {
+			a.refreshed = map[[sha256.Size]byte]refreshResult{}
+		}
+		for k, v := range a.refreshed {
+			if now.After(v.until) {
+				delete(a.refreshed, k)
+			}
+		}
+		a.refreshed[key] = refreshResult{session: fresh, until: now.Add(refreshGrace)}
+		return fresh, nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	return fresh, nil
+	return v.(*Session), nil
+}
+
+func (a *Auth) recentRefresh(key [sha256.Size]byte) (*Session, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	v, ok := a.refreshed[key]
+	if !ok || time.Now().After(v.until) {
+		return nil, false
+	}
+	return v.session, true
 }

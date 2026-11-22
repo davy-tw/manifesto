@@ -377,6 +377,7 @@ status:
 - 編輯器的 History 列出 Edition，可以把舊版載入編輯器，儲存後即還原
 - 編輯衝突以 `resourceVersion` 樂觀鎖偵測（API 回 409 時提示合併）；寫入用 Server-Side Apply，fieldManager 為 `manifesto-desk`，一律 `force=true`：`mfctl edition restore` 或 `kubectl edit` 改過的欄位屬於別的 field manager，不 force 的話作者存檔會被誤判為衝突；真正的並行編輯由 resourceVersion 擋下
 - 登入用 OIDC authorization code + PKCE；ID token 與 refresh token 以 AES-GCM 加密存在 cookie（金鑰由 press 建立在 Secret `manifesto-desk-session`），desk 不保存任何 session，可以多副本
+- refresh 由瀏覽器發起，一次只送一個：ID token 剩不到 5 秒時，API 請求回 401 並帶 `X-Manifesto-Desk-Refresh`，SPA 送 `POST /auth/refresh`（同一分頁的請求共用這一次，跨分頁用 Web Lock 排隊）後重送。desk 在到期前 30 秒內才真的換新，存下 IdP 回傳的新 refresh token（輪替）；同一個 refresh token 在同一個副本內只換一次，結果保留 2 分鐘給還帶著舊 cookie 的請求。這樣開啟 refresh token 重用偵測的 IdP 不會因為並行請求把整串 token 撤銷
 - desk 以 volume 掛載這個 Secret：初次安裝時 press 啟動前，desk 的 Pod 會停在 ContainerCreating，press 建立 Secret 後 kubelet 自動重試，不需要安排啟動順序（`helm install --wait` 會等到兩者都 Ready）
 - 代理只轉送 Manifesto 需要的路徑（manifesto.davy.tw 資源、events、RoleBinding、SelfSubject*Review），其他回 404；用 cookie 的寫入必須帶 `X-Manifesto-Desk` header 且 Origin 相同，防止 CSRF
 - 也接受 `Authorization: Bearer`（不經 cookie），方便腳本與測試
