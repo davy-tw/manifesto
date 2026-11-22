@@ -119,6 +119,16 @@ var _ = Describe("Gazette routing", func() {
 		Eventually(func() bool { return apierrors.IsNotFound(exists(grant)()) }, timeout, interval).Should(BeTrue())
 	})
 
+	It("does not route a Gazette that claims a reserved domain", func() {
+		g := newGazette(newNamespace(), "squatter", "desk.reserved.test")
+		Expect(k8sClient.Create(ctx, g)).To(Succeed())
+		Eventually(fetch(g), timeout, interval).Should(WithTransform(routed, Equal("False/"+v1.ReasonDomainReserved)))
+		Expect(condition(g.Status.Conditions, v1.ConditionReady).Reason).To(Equal(v1.ReasonDomainReserved))
+		Consistently(func() bool {
+			return apierrors.IsNotFound(exists(listenerSet(g.Namespace, "squatter"))())
+		}, time.Second, interval).Should(BeTrue())
+	})
+
 	It("does not route a Gazette that lost its domain", func() {
 		dom := fmt.Sprintf("taken-%d.example.io", nsCounter.Add(1))
 		first := newGazette(newNamespace(), "first", dom)

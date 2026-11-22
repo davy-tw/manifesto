@@ -41,6 +41,9 @@ import (
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
+// reservedDomain is passed to press as a reserved domain, like desk's.
+const reservedDomain = "desk.reserved.test"
+
 // testRouting is the routing configuration press runs with in these tests.
 var testRouting = Routing{
 	Gateway:       types.NamespacedName{Namespace: "infra", Name: "public"},
@@ -132,7 +135,7 @@ var _ = BeforeSuite(func() {
 	}
 
 	// Keep 3 Editions so pruning is quick to see.
-	Expect(Setup(mgr, Options{Routing: testRouting, Media: media, Editions: 3})).To(Succeed())
+	Expect(Setup(mgr, Options{Routing: testRouting, Media: media, Editions: 3, ReservedDomains: []string{reservedDomain}})).To(Succeed())
 	go func() {
 		defer GinkgoRecover()
 		Expect(mgr.Start(ctx)).To(Succeed())

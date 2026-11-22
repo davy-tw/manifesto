@@ -64,7 +64,8 @@ spec:
                   domain is the host name visitors use to reach this Gazette, for example
                   "alice.example.io". herald picks the Gazette by the request's Host header.
                   When Gazettes in different namespaces claim the same domain, the oldest
-                  one wins and the others report DomainConflict.
+                  one wins and the others report DomainConflict. Domains reserved for
+                  Manifesto's own components (desk, darkroom) report DomainReserved.
                 maxLength: 253
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                 type: string
@@ -135,7 +136,8 @@ spec:
                 description: |-
                   conditions describe the Gazette's current state. "Ready" is True when the
                   Gazette owns its domain and its theme exists and parses; otherwise its
-                  reason is DomainConflict, TypesetNotFound or TemplateError.
+                  reason is DomainConflict, DomainReserved, TypesetNotFound or
+                  TemplateError.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

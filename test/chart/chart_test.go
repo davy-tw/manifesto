@@ -26,8 +26,15 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/yaml"
+
+	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
+	"go.pkgs.davy.tw/manifesto/internal/controller"
 )
 
 const ns = "manifesto-system"
@@ -300,3 +307,180 @@ func TestChartValues(t *testing.T) {
 }
 
 func bufioReader(b []byte) *bufio.Reader { return bufio.NewReader(bytes.NewReader(b)) }
+
+// TestChartRoutes checks desk's and darkroom's routes: the objects press
+// applies for a Gazette of that hostname in the release namespace, in both
+// routing modes, unless parentRefs takes over.
+func TestChartRoutes(t *testing.T) {
+	base := []string{"desk.publicURL=https://desk.example.io", "desk.route.enabled=true",
+		"darkroom.publicURL=https://media.example.io:8443", "darkroom.route.enabled=true",
+		"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}
+	gateway := types.NamespacedName{Namespace: "infra", Name: "gw"}
+
+	modes := []struct {
+		name    string
+		set     []string
+		routing controller.Routing
+	}{
+		{"gateway mode", []string{"press.routing.mode=gateway", "press.routing.gatewaySection=websecure"},
+			controller.Routing{Mode: controller.ModeGateway, Gateway: gateway, GatewaySection: "websecure"}},
+		{"listenerset mode", []string{"press.routing.listenerHTTPSPort=8443", "press.routing.listenerHTTPPort=8000"},
+			controller.Routing{Mode: controller.ModeListenerSet, Gateway: gateway, HTTPSPort: 8443, HTTPPort: 8000}},
+		{"listenerset mode with cert-manager", []string{"press.routing.clusterIssuer=letsencrypt"},
+			controller.Routing{Mode: controller.ModeListenerSet, Gateway: gateway, HTTPSPort: 443, HTTPPort: 80,
+				ClusterIssuer: "letsencrypt"}},
+	}
+	for _, m := range modes {
+		t.Run(m.name, func(t *testing.T) {
+			objs, err := helmTemplate(t, append(slices.Clone(base), m.set...)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]bool{}
+			for component, host := range map[string]string{"desk": "desk.example.io", "darkroom": "media.example.io"} {
+				rt := m.routing
+				rt.Herald, rt.HeraldPort = types.NamespacedName{Namespace: ns, Name: "manifesto-" + component}, 80
+				g := &v1.Gazette{Namespace: ns, Name: component, Spec: v1.GazetteSpec{Domain: host}}
+				for _, o := range controller.RoutingObjects(rt, g) {
+					w := toUnstructured(t, o)
+					k := key(w)
+					want[k] = true
+					got := objs[k]
+					if got == nil {
+						t.Errorf("%s not rendered", k)
+						continue
+					}
+					// Compared as YAML: the chart's numbers come back as float64.
+					a, _ := yaml.Marshal(got.Object["spec"])
+					b, _ := yaml.Marshal(w.Object["spec"])
+					if !bytes.Equal(a, b) {
+						t.Errorf("%s: spec differs from press\nchart:\n%s\npress:\n%s", k, a, b)
+					}
+					if got.GetLabels()["app.kubernetes.io/component"] != component {
+						t.Errorf("%s labels = %v", k, got.GetLabels())
+					}
+				}
+			}
+			for k, o := range objs {
+				switch o.GetKind() {
+				case "HTTPRoute", "ListenerSet", "Certificate":
+					if !want[k] {
+						t.Errorf("%s rendered, press would not create it", k)
+					}
+				}
+			}
+		})
+	}
+
+	t.Run("parentRefs replaces the Gateway", func(t *testing.T) {
+		objs, err := helmTemplate(t, "desk.publicURL=https://desk.example.io", "desk.route.enabled=true",
+			"desk.route.parentRefs[0].name=other", "desk.route.parentRefs[0].sectionName=https")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := convert[gatewayv1.HTTPRoute](t, objs["HTTPRoute/"+ns+"/manifesto-desk"])
+		if len(r.Spec.ParentRefs) != 1 || r.Spec.ParentRefs[0].Name != "other" || r.Spec.Hostnames[0] != "desk.example.io" {
+			t.Errorf("route spec = %+v", r.Spec)
+		}
+		if objs["ListenerSet/"+ns+"/manifesto-desk"] != nil {
+			t.Error("a ListenerSet was rendered next to parentRefs")
+		}
+	})
+
+	t.Run("off by default", func(t *testing.T) {
+		objs, err := helmTemplate(t, "desk.publicURL=https://desk.example.io", "press.routing.gatewayName=gw",
+			"press.routing.gatewayNamespace=infra")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k, o := range objs {
+			if strings.HasPrefix(o.GetAPIVersion(), "gateway.networking.k8s.io/") {
+				t.Errorf("%s rendered without route.enabled", k)
+			}
+		}
+	})
+
+	t.Run("reserves the hostnames", func(t *testing.T) {
+		for _, tc := range []struct {
+			set  []string
+			want string
+		}{
+			{[]string{"desk.publicURL=https://Desk.example.io:8443", "darkroom.publicURL=https://media.example.io"},
+				"--reserved-domains=desk.example.io,media.example.io"},
+			{[]string{"desk.publicURL=https://desk.example.io"}, "--reserved-domains=desk.example.io"},
+			{[]string{"desk.enabled=false", "darkroom.enabled=false", "darkroom.publicURL=https://media.example.io"}, ""},
+		} {
+			objs, err := helmTemplate(t, tc.set...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			for _, a := range args(t, objs, "manifesto-controller-manager") {
+				if strings.HasPrefix(a, "--reserved-domains") {
+					got = a
+				}
+			}
+			if got != tc.want {
+				t.Errorf("%v: press arg = %q, want %q", tc.set, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("not without darkroom", func(t *testing.T) {
+		objs, err := helmTemplate(t, "desk.publicURL=https://d", "darkroom.enabled=false",
+			"darkroom.route.enabled=true", "press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if objs["HTTPRoute/"+ns+"/manifesto-darkroom"] != nil {
+			t.Error("darkroom's route rendered while darkroom is disabled")
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		set  []string
+		want string
+	}{
+		{"needs a Gateway", []string{"desk.publicURL=https://d.example.io", "desk.route.enabled=true"},
+			"desk.route needs press.routing.gatewayName"},
+		{"needs darkroom's publicURL", []string{"desk.publicURL=https://d", "darkroom.route.enabled=true",
+			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "darkroom.publicURL is required"},
+		{"needs a hostname", []string{"desk.publicURL=desk", "desk.route.enabled=true",
+			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "needs a publicURL with a hostname"},
+		{"needs https for a ListenerSet", []string{"desk.publicURL=http://d.example.io", "desk.route.enabled=true",
+			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "publicURL must be https://"},
+		{"needs a lower-case hostname", []string{"desk.publicURL=https://D.example.io", "desk.route.enabled=true",
+			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "needs a lower-case hostname"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := helmTemplate(t, tc.set...); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func toUnstructured(t *testing.T, o client.Object) *unstructured.Unstructured {
+	t.Helper()
+	if u, ok := o.(*unstructured.Unstructured); ok {
+		return u
+	}
+	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := &unstructured.Unstructured{Object: m}
+	gvk, err := apiutil.GVKForObject(o, scheme())
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.SetGroupVersionKind(gvk)
+	return u
+}
+
+func scheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	_ = gatewayv1.Install(s)
+	return s
+}

@@ -1,0 +1,137 @@
+{{- /*
+Routes for desk and darkroom's public port: the objects press applies for a
+Gazette, built here for a fixed hostname (the component's publicURL). With the
+default parentRefs they attach where press attaches Gazettes:
+
+- gateway mode: an HTTPRoute on the Gateway (and its gatewaySection).
+- listenerset mode: a ListenerSet with the hostname's HTTPS and HTTP
+  listeners, the HTTPRoute on its HTTPS listener, a redirect HTTPRoute on its
+  HTTP listener, and a cert-manager Certificate when clusterIssuer is set.
+
+With route.parentRefs only the HTTPRoute is created, attached there.
+*/ -}}
+{{- define "manifesto.route" -}}
+{{- $root := index . 0 -}}
+{{- $component := index . 1 -}}
+{{- $url := index . 2 -}}
+{{- $route := index . 3 -}}
+{{- $r := $root.Values.press.routing -}}
+{{- $ns := $root.Release.Namespace -}}
+{{- $name := printf "manifesto-%s" $component -}}
+{{- $host := include "manifesto.host" $url -}}
+{{- if not $host }}{{ fail (printf "%s.route needs a publicURL with a hostname, got %q" $component $url) }}{{ end -}}
+{{- if ne $host (lower $host) }}{{ fail (printf "%s.route needs a lower-case hostname in publicURL, got %q" $component $host) }}{{ end -}}
+{{- if and (not $route.parentRefs) (not $r.gatewayName) }}{{ fail (printf "%s.route needs press.routing.gatewayName, or %s.route.parentRefs" $component $component) }}{{ end -}}
+{{- /* press.yaml requires gatewayNamespace along with gatewayName. */ -}}
+{{- $gatewayNS := $r.gatewayNamespace -}}
+{{- $listenerSet := and (not $route.parentRefs) (ne $r.mode "gateway") -}}
+{{- if and $listenerSet (ne (urlParse $url).scheme "https") }}{{ fail (printf "%s.route in listenerset mode serves HTTPS and redirects HTTP to it, so publicURL must be https://, got %q" $component $url) }}{{ end -}}
+{{- $labels := include "manifesto.componentLabels" (list $root $component) -}}
+{{- if $listenerSet }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  parentRef:
+    name: {{ $r.gatewayName }}
+    namespace: {{ $gatewayNS }}
+  listeners:
+  - name: https
+    hostname: {{ $host }}
+    port: {{ $r.listenerHTTPSPort }}
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: {{ $name }}-tls
+    allowedRoutes:
+      namespaces: {from: Same}
+  - name: http
+    hostname: {{ $host }}
+    port: {{ $r.listenerHTTPPort }}
+    protocol: HTTP
+    allowedRoutes:
+      namespaces: {from: Same}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}-redirect
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: {{ $name }}
+    sectionName: http
+  hostnames: [{{ $host }}]
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect: {scheme: https, statusCode: 301}
+{{- with $r.clusterIssuer }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  secretName: {{ $name }}-tls
+  dnsNames: [{{ $host }}]
+  issuerRef: {group: cert-manager.io, kind: ClusterIssuer, name: {{ . }}}
+{{- end }}
+{{- end }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  parentRefs:
+  {{- if $route.parentRefs }}
+  {{- toYaml $route.parentRefs | nindent 2 }}
+  {{- else if $listenerSet }}
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    name: {{ $name }}
+    sectionName: https
+  {{- else }}
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: {{ $r.gatewayName }}
+    namespace: {{ $gatewayNS }}
+    {{- with $r.gatewaySection }}
+    sectionName: {{ . }}
+    {{- end }}
+  {{- end }}
+  hostnames: [{{ $host }}]
+  rules:
+  - backendRefs:
+    - name: {{ $name }}
+      namespace: {{ $ns }}
+      port: 80
+{{- end }}
+
+{{- if and .Values.desk.enabled .Values.desk.route.enabled }}
+{{ include "manifesto.route" (list $ "desk" .Values.desk.publicURL .Values.desk.route) }}
+{{- end }}
+
+{{- with .Values.darkroom }}
+{{- if and .enabled .route.enabled }}
+{{- $url := required "darkroom.publicURL is required with darkroom.route.enabled, e.g. https://media.example.io" .publicURL }}
+{{ include "manifesto.route" (list $ "darkroom" $url .route) }}
+{{- end }}
+{{- end }}

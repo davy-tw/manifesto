@@ -107,6 +107,7 @@ spec:
 
 		if utils.Provider() == utils.ProviderK3d {
 			expectServedThroughTraefik()
+			expectChartRoutes()
 		}
 
 		By("retracting it")

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -53,23 +54,11 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
 
-		if utils.Provider() == utils.ProviderK3d {
-			// k3s, the first production target, is installed with the Helm
-			// chart in gateway routing mode for its Traefik (docs/k3s.md).
-			By("installing with the Helm chart")
-			installWithHelm()
-		} else {
-			By("installing CRDs")
-			cmd = exec.Command("make", "install")
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
-
-			By("deploying the controller-manager")
-			cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage), fmt.Sprintf("HERALD_IMG=%s", heraldImage),
-				fmt.Sprintf("DARKROOM_IMG=%s", darkroomImage), fmt.Sprintf("DESK_IMG=%s", deskImage))
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
-		}
+		// Both providers install the Helm chart, as users do; on k3s, the
+		// first production target, in gateway routing mode for its Traefik
+		// (docs/k3s.md).
+		By("installing with the Helm chart")
+		installWithHelm()
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
@@ -84,11 +73,7 @@ var _ = Describe("Manager", Ordered, func() {
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
-		if utils.Provider() == utils.ProviderK3d {
-			cmd = exec.Command("bin/helm", "uninstall", "manifesto", "-n", namespace, "--wait")
-		} else {
-			cmd = exec.Command("make", "undeploy")
-		}
+		cmd = exec.Command("bin/helm", "uninstall", "manifesto", "-n", namespace, "--wait")
 		_, _ = utils.Run(cmd)
 
 		By("uninstalling CRDs")
@@ -349,4 +334,33 @@ type tokenRequest struct {
 	Status struct {
 		Token string `json:"token"`
 	} `json:"status"`
+}
+
+// installWithHelm installs the chart with the images under test and waits for
+// it. On k3d press runs in gateway routing mode and desk and darkroom are
+// routed by the chart, on the Gateway press uses.
+func installWithHelm() {
+	_, err := utils.Run(exec.Command("make", "helm"))
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	// The images under test are loaded into the nodes, not pulled from ghcr.io.
+	set := []string{"imageRegistry=",
+		"desk.publicURL=https://" + deskDomain, "darkroom.publicURL=https://" + chartMediaDomain}
+	if utils.Provider() == utils.ProviderK3d {
+		set = append(set, "desk.route.enabled=true", "darkroom.route.enabled=true")
+		set = append(set, helmRoutingValues...)
+	}
+	for component, image := range map[string]string{
+		"press": managerImage, "herald": heraldImage, "darkroom": darkroomImage, "desk": deskImage,
+	} {
+		repo, tag, _ := strings.Cut(image[strings.LastIndex(image, "/")+1:], ":")
+		repo = image[:strings.LastIndex(image, "/")+1] + repo
+		set = append(set, component+".image.repository="+repo, component+".image.tag="+tag)
+	}
+	args := make([]string, 0, 8+2*len(set))
+	args = append(args, "install", "manifesto", "charts/manifesto", "-n", namespace, "--wait", "--timeout", "5m")
+	for _, s := range set {
+		args = append(args, "--set", s)
+	}
+	_, err = utils.Run(exec.Command("bin/helm", args...))
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install the Helm chart")
 }

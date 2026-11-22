@@ -44,6 +44,9 @@ type Options struct {
 	Clock   clock.PassiveClock
 	Routing Routing
 	Media   Media
+	// ReservedDomains are served by something other than a Gazette, such as
+	// desk and darkroom: a Gazette claiming one is not Ready and not routed.
+	ReservedDomains []string
 	// Editions is how many Editions to keep per Dispatch: 0 means
 	// DefaultEditionLimit, a negative number turns Editions off.
 	Editions int
@@ -108,7 +111,7 @@ func Setup(mgr ctrl.Manager, opts Options) error {
 		opts.Media.Secrets = mgr.GetAPIReader()
 	}
 	for _, r := range []interface{ SetupWithManager(ctrl.Manager) error }{
-		&GazetteReconciler{Client: c, Scheme: scheme, Routing: opts.Routing},
+		&GazetteReconciler{Client: c, Scheme: scheme, Routing: opts.Routing, Reserved: domain.NewSet(opts.ReservedDomains)},
 		&DispatchReconciler{Client: c, Scheme: scheme, Clock: opts.Clock},
 		&PrintReconciler{Client: c, Scheme: scheme, Media: opts.Media, Clock: opts.Clock},
 		&ArchiveReconciler{Client: c, Scheme: scheme, Media: opts.Media},

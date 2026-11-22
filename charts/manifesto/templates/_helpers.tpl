@@ -72,3 +72,8 @@ namespace and adding the chart's labels: (list $ "files/rbac.yaml" annotations).
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/* The hostname of a URL, without its port. */}}
+{{- define "manifesto.host" -}}
+{{- regexReplaceAll ":[0-9]+$" (urlParse .).host "" -}}
+{{- end }}

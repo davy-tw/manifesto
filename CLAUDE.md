@@ -80,13 +80,13 @@ M1（MVP）、M2（內容與網站）、M3（媒體，PVC 與 S3 後端）、M4�
 - 角色：`config/rbac/manifesto_roles.yaml`（envtest 在 `test/rbac`）
 - mfctl：`internal/mfctl`（cobra；`typeset build`、`print upload`、`edition list|show|restore`，envtest 內跑 press 與 darkroom）與 `cmd/mfctl`
 - 發布：`v*` tag 觸發 `.github/workflows/release.yml`（image 推 ghcr.io、chart 推成 OCI、GoReleaser 發布 mfctl，`.goreleaser.yaml`）；`release-check.yml` 在相關檔案改動時試跑不發布；Dockerfile 在建置平台交叉編譯，多架構不需 QEMU
-- Helm chart：`charts/manifesto`（CRD 與 RBAC 由 `make chart` 從 kustomize 輸出產生到 `files/`，不要手改；`test/chart` 比對 chart 與 kustomize；k3d E2E 用 Helm 安裝）
+- Helm chart：`charts/manifesto`（CRD 與 RBAC 由 `make chart` 從 kustomize 輸出產生到 `files/`，不要手改；`test/chart` 比對 chart 與 kustomize；Kind 與 k3d 的 E2E 都用 Helm 安裝，k3d 另外開啟 gateway 模式與 chart 路由）
 - Edition：`internal/controller/edition_controller.go`（內容 digest 改變才建立 `<dispatch>-<n>`，保留 `--editions` 版且總內容不超過 `--edition-bytes`，預設 20 版、2Mi，最新一版一定保留；spec 以 CEL 禁止修改）
 - 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 與 k3d（k3s + Traefik，`make test-e2e-k3d`，含 gateway 路由經過 Traefik 的驗證）上的 E2E 在 `test/e2e`，CI 兩者都跑；envtest 用的第三方 CRD 在 `test/crds`
 
 目標環境：先以 k3s（內建 Traefik）做小規模正式測試，見 `docs/k3s.md`。新功能要能在 k3s 上運作：Traefik 不支援 ListenerSet（v3.8 前）、listener port 必須是 entrypoint port（8000/8443）、預設 StorageClass `local-path` 只有 RWO。
 
-路由慣例：press 以 `--gateway-name` 啟用，`--routing-mode=gateway`（k3s 用）只建立掛到 Gateway 的 HTTPRoute；預設的 `listenerset` 模式下，每個擁有網域的 Gazette 在自己的 namespace 得到 `manifesto-<gazette>` 的 ListenerSet、HTTPRoute、`-redirect` HTTPRoute 與 Certificate（ownerReference 回收，不用 finalizer），herald 的 namespace 有每個 namespace 一個的 ReferenceGrant。
+路由慣例：press 以 `--gateway-name` 啟用，`--routing-mode=gateway`（k3s 用）只建立掛到 Gateway 的 HTTPRoute；預設的 `listenerset` 模式下，每個擁有網域的 Gazette 在自己的 namespace 得到 `manifesto-<gazette>` 的 ListenerSet、HTTPRoute、`-redirect` HTTPRoute 與 Certificate（ownerReference 回收，不用 finalizer），herald 的 namespace 有每個 namespace 一個的 ReferenceGrant。chart 的 `desk.route`、`darkroom.route`（預設關閉）替 desk 與媒體網域建立同樣的物件，`test/chart` 用 `controller.RoutingObjects` 比對，改 press 的路由物件時兩邊要一起改。chart 把 desk 與 darkroom 的 `publicURL` 網域以 `--reserved-domains` 傳給 press，宣告這些網域的 Gazette 回報 `DomainReserved`。
 
 媒體慣例：物件 key 為 `<namespace UID>/sha256/<hash>.<ext>`；Pending 的 Print 每 2 秒輪詢 `Exists`；Print 有 finalizer `manifesto.davy.tw/stored-object`，同 namespace 沒有其他 Print 用同一個物件時才刪檔。darkroom 只用 RWO PVC，單一副本、`Recreate`。
 

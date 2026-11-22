@@ -85,6 +85,9 @@ func main() {
 		Development: true,
 	}
 	var routing controller.Routing
+	var reserved string
+	flag.StringVar(&reserved, "reserved-domains", "",
+		"Comma-separated domains that no Gazette may claim, such as desk's and darkroom's.")
 	var heraldService string
 	flag.StringVar(&routing.Gateway.Name, "gateway-name", "",
 		"Gateway that each Gazette's ListenerSet attaches to. Leave empty to manage routing yourself.")
@@ -261,7 +264,8 @@ func main() {
 
 	pressOpts := controller.Options{
 		Clock: clock.RealClock{}, Routing: routing, Media: media, Editions: editions,
-		EditionBytes: editionBytesOption(editionBytes.Value()),
+		ReservedDomains: strings.Split(reserved, ","),
+		EditionBytes:    editionBytesOption(editionBytes.Value()),
 	}
 	if err := controller.Setup(mgr, pressOpts); err != nil {
 		setupLog.Error(err, "Failed to set up controllers")

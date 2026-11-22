@@ -35,6 +35,7 @@ const (
 	ReasonScribeNotFound   = "ScribeNotFound"
 	ReasonRenderSucceeded  = "RenderSucceeded"
 	ReasonDomainConflict   = "DomainConflict"
+	ReasonDomainReserved   = "DomainReserved"
 	ReasonTypesetNotFound  = "TypesetNotFound"
 	ReasonTemplateError    = "TemplateError"
 	ReasonTemplatesParsed  = "TemplatesParsed"

@@ -39,6 +39,8 @@ type GazetteReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	Routing Routing
+	// Reserved are domains served by something other than a Gazette.
+	Reserved domain.Set
 }
 
 // +kubebuilder:rbac:groups=manifesto.davy.tw,resources=gazettes,verbs=get;list;watch
@@ -46,7 +48,8 @@ type GazetteReconciler struct {
 
 // Reconcile computes the status of one Gazette. When Gazettes in different
 // namespaces claim the same domain, the oldest one is Ready and the others
-// report DomainConflict. A missing theme reports TypesetNotFound (the
+// report DomainConflict; a Gazette claiming a reserved domain (desk's or
+// darkroom's) reports DomainReserved. A missing theme reports TypesetNotFound (the
 // built-in theme is used meanwhile) and a broken one TemplateError.
 func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var g v1.Gazette
@@ -76,11 +79,18 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		Message:            fmt.Sprintf("Serving %s", g.Spec.Domain),
 		ObservedGeneration: g.Generation,
 	}
-	ownsDomain := owner == nil || (owner.Namespace == g.Namespace && owner.Name == g.Name)
+	// claim is why g may not serve its domain, empty when it may.
+	var claim string
 	switch {
-	case !ownsDomain:
+	case r.Reserved.Has(g.Spec.Domain):
+		claim = v1.ReasonDomainReserved
 		ready.Status = metav1.ConditionFalse
-		ready.Reason = v1.ReasonDomainConflict
+		ready.Reason = claim
+		ready.Message = fmt.Sprintf("Domain %s is reserved for Manifesto's own components", g.Spec.Domain)
+	case owner != nil && (owner.Namespace != g.Namespace || owner.Name != g.Name):
+		claim = v1.ReasonDomainConflict
+		ready.Status = metav1.ConditionFalse
+		ready.Reason = claim
 		ready.Message = fmt.Sprintf("Domain %s is already served by Gazette %s/%s", g.Spec.Domain, owner.Namespace, owner.Name)
 	case theme.Err != nil:
 		ready.Status = metav1.ConditionFalse
@@ -98,7 +108,7 @@ func (r *GazetteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := r.reconcileReferenceGrant(ctx, g.Namespace); err != nil {
 			return ctrl.Result{}, err
 		}
-		routed, err := r.reconcileRouting(ctx, &g, ownsDomain)
+		routed, err := r.reconcileRouting(ctx, &g, claim)
 		if err != nil {
 			return ctrl.Result{}, err
 		}

@@ -110,7 +110,7 @@ HTTP 轉 HTTPS 建議在 Traefik 的 `web` entrypoint 設定轉址。Helm chart 
 
 ## 5. 部署 Manifesto 並啟用路由
 
-用發布到 ghcr.io 的 Helm chart 安裝，打開 gateway 路由模式：
+用發布到 ghcr.io 的 Helm chart 安裝，打開 gateway 路由模式。`values-k3s.yaml` 是你自己建立的檔案：
 
 ```yaml
 # values-k3s.yaml
@@ -123,7 +123,15 @@ press:
 desk:
   publicURL: https://desk.blog.example.io
   tokenSignIn: true        # 還沒有 OIDC 時（見第 8 步）
+  route:
+    enabled: true          # 把 desk 掛到同一個 Gateway（第 8 步）
+darkroom:
+  publicURL: https://media.blog.example.io
+  route:
+    enabled: true          # 把媒體網域掛到同一個 Gateway（第 7 步）
 ```
+
+`desk.route` 與 `darkroom.route` 會在 `manifesto-system` 建立 HTTPRoute，hostname 取自各自的 `publicURL`，掛到 `press.routing` 指定的 Gateway 與 listener，跟 press 替 Gazette 建的一樣。兩個網域都要在 Gateway listener 的 hostname 範圍內（這裡是 `*.blog.example.io`）。Gazette 不要建在 `manifesto-system`：名為 `desk` 或 `darkroom` 的 Gazette 會跟這兩條路由同名。chart 會把 desk 與 `darkroom.publicURL` 的網域傳給 press（`--reserved-domains`），其他 namespace 的 Gazette 宣告這些網域時會回報 `DomainReserved`，不會建立路由。
 
 ```sh
 kubectl create namespace manifesto-system
@@ -141,12 +149,14 @@ make docker-build IMG=manifesto-press:dev
 make docker-build COMPONENT=herald IMG=manifesto-herald:dev
 make docker-build COMPONENT=darkroom IMG=manifesto-darkroom:dev
 make docker-build COMPONENT=desk IMG=manifesto-desk:dev
-docker save manifesto-press:dev manifesto-herald:dev manifesto-darkroom:dev manifesto-desk:dev | sudo k3s ctr images import -
+docker save manifesto-press:dev manifesto-herald:dev manifesto-darkroom:dev manifesto-desk:dev | sudo k3s ctr -n k8s.io images import -
 make helm
 bin/helm install manifesto charts/manifesto -n manifesto-system -f values-k3s.yaml --wait \
   --set imageRegistry= --set press.image.tag=dev --set herald.image.tag=dev \
   --set darkroom.image.tag=dev --set desk.image.tag=dev
 ```
+
+k3s 跑在容器裡（例如 k3d）時，改用 `docker save ... | docker exec -i <節點容器> ctr -n k8s.io images import -`：沒有 `-i` 時 stdin 不會傳進容器，ctr 會回 `unrecognized image format`。kubelet 只看 containerd 的 `k8s.io` namespace，所以要加 `-n k8s.io`。用 podman build 時，image 名稱會是 `localhost/manifesto-*:dev`，安裝時改成 `--set imageRegistry=localhost`。
 
 </details>
 
@@ -188,7 +198,28 @@ curl -sI https://alice.blog.example.io/
 
 darkroom 的 PVC 用 k3s 預設的 `local-path`，資料在節點的 `/var/lib/rancher/k3s/storage` 底下，備份時要一起備份（文章本身在 etcd，用 k3s 的 etcd snapshot）。`local-path` 只有 RWO，所以 darkroom 只跑一個副本、更新時先停再起。
 
-讓訪客讀得到檔案：替媒體網域建一條 HTTPRoute，掛到同一個 Gateway（`*.blog.example.io` 底下的網域就能共用萬用字元憑證）：
+讓訪客讀得到檔案：第 5 步的 `darkroom.route.enabled` 已經替媒體網域（`darkroom.publicURL`）建了 HTTPRoute，掛在同一個 Gateway，`*.blog.example.io` 底下的網域共用萬用字元憑證。確認 Traefik 接受了它：
+
+```sh
+kubectl -n manifesto-system get httproute manifesto-darkroom \
+  -o jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'
+```
+
+再建立 ClusterArchive，`publicURL` 與 `darkroom.publicURL` 相同（chart 不建立它：CRD 與它在同一個 release 時，首次安裝會找不到這個 kind）：
+
+```yaml
+apiVersion: manifesto.davy.tw/v1alpha1
+kind: ClusterArchive
+metadata:
+  name: local
+spec:
+  pvc:
+    claimName: manifesto-media-data
+    publicURL: https://media.blog.example.io
+```
+
+<details>
+<summary>不用 chart 的路由（自己建 HTTPRoute）</summary>
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -205,7 +236,7 @@ spec:
     - {name: manifesto-darkroom, port: 80}
 ```
 
-再建立 ClusterArchive，`publicURL: https://media.blog.example.io`。
+</details>
 
 ## 8. 管理介面（desk）與 OIDC
 
@@ -243,7 +274,10 @@ API server 會定期重新讀取這個檔案，之後改 issuer 或 claim 對應
 kubectl -n manifesto-system create secret generic manifesto-desk-oidc --from-literal=clientSecret=<secret>
 ```
 
-替 desk 建一條 HTTPRoute（同樣用萬用字元憑證）。desk 的 session cookie 只走 HTTPS，所以要從 `websecure` 連：
+desk 的路由由第 5 步的 `desk.route.enabled` 建立（同樣用萬用字元憑證）。desk 的 session cookie 只走 HTTPS，所以 `gatewaySection` 要是 HTTPS 的 listener（這裡是 `websecure`）。
+
+<details>
+<summary>不用 chart 的路由（自己建 HTTPRoute）</summary>
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -260,6 +294,8 @@ spec:
     - {name: manifesto-desk, port: 80}
 ```
 
+</details>
+
 最後用 RoleBinding 把群組綁到角色（見 README 的「權限」）：
 
 ```sh
@@ -268,7 +304,7 @@ kubectl create rolebinding editors -n blog-alice --clusterrole=manifesto-editor 
 
 ## CI 上的對應測試
 
-`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 5 步設定（用 Helm chart 安裝；TLS 用 cert-manager 從自簽 CA 簽發的 `*.e2e.test` 萬用字元憑證代替 Let's Encrypt），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 以 HTTPS 讀得到文章（curl 只信任測試 CA，不用 `-k`；沒有 CA 時驗證會失敗；`web` listener 不提供文章），並上傳一個 Print 經過 darkroom 存取。desk 以 ServiceAccount token 代替 OIDC token，確認它用呼叫者的權限讀寫與預覽（OIDC 登入流程由 envtest 與 Playwright 的 `make test-ui` 涵蓋）。設定檔在 `test/e2e/k3d/`。
+`make test-e2e-k3d` 用 k3d 起一個 k3s 叢集，照這份文件的第 1 到 5 步設定（用 Helm chart 安裝；TLS 用 cert-manager 從自簽 CA 簽發的 `*.e2e.test` 萬用字元憑證代替 Let's Encrypt），再確認 Gazette 的 `Routed` 為 True、從叢集內經過 Traefik 以 HTTPS 讀得到文章（curl 只信任測試 CA，不用 `-k`；沒有 CA 時驗證會失敗；`web` listener 不提供文章），也經過 Traefik 以 HTTPS 連到 chart 替 desk 與 darkroom 建的路由，並上傳一個 Print 經過 darkroom 存取。desk 以 ServiceAccount token 代替 OIDC token，確認它用呼叫者的權限讀寫與預覽（OIDC 登入流程由 envtest 與 Playwright 的 `make test-ui` 涵蓋）。設定檔在 `test/e2e/k3d/`。
 
 ## 之後的里程碑要注意的地方
 

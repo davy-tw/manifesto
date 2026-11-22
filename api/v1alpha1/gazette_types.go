@@ -61,7 +61,8 @@ type GazetteSpec struct {
 	// domain is the host name visitors use to reach this Gazette, for example
 	// "alice.example.io". herald picks the Gazette by the request's Host header.
 	// When Gazettes in different namespaces claim the same domain, the oldest
-	// one wins and the others report DomainConflict.
+	// one wins and the others report DomainConflict. Domains reserved for
+	// Manifesto's own components (desk, darkroom) report DomainReserved.
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +required
@@ -107,7 +108,8 @@ type GazetteStatus struct {
 
 	// conditions describe the Gazette's current state. "Ready" is True when the
 	// Gazette owns its domain and its theme exists and parses; otherwise its
-	// reason is DomainConflict, TypesetNotFound or TemplateError.
+	// reason is DomainConflict, DomainReserved, TypesetNotFound or
+	// TemplateError.
 	// +listType=map
 	// +listMapKey=type
 	// +optional

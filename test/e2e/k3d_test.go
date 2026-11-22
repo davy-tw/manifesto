@@ -24,6 +24,10 @@ import (
 const (
 	gatewayAPIInstall = "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.7.0/standard-install.yaml"
 	traefikService    = "traefik.kube-system.svc.cluster.local"
+	// deskDomain and chartMediaDomain are the hostnames the chart routes to
+	// desk and darkroom, under the Gateway's wildcard.
+	deskDomain       = "desk.e2e.test"
+	chartMediaDomain = "files.e2e.test"
 )
 
 // helmRoutingValues put press in gateway mode on k3d, as docs/k3s.md does.
@@ -71,29 +75,6 @@ func setupTraefikGateway() {
 	}, 3*time.Minute, 5*time.Second).Should(Succeed(), "Traefik did not program the Gateway")
 }
 
-// installWithHelm installs the chart with the images under test, in gateway
-// routing mode, and waits for press.
-func installWithHelm() {
-	_, err := utils.Run(exec.Command("make", "helm"))
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	// The images under test are loaded into the nodes, not pulled from ghcr.io.
-	set := append([]string{"desk.publicURL=http://desk.e2e.test", "imageRegistry="}, helmRoutingValues...)
-	for component, image := range map[string]string{
-		"press": managerImage, "herald": heraldImage, "darkroom": darkroomImage, "desk": deskImage,
-	} {
-		repo, tag, _ := strings.Cut(image[strings.LastIndex(image, "/")+1:], ":")
-		repo = image[:strings.LastIndex(image, "/")+1] + repo
-		set = append(set, component+".image.repository="+repo, component+".image.tag="+tag)
-	}
-	args := make([]string, 0, 8+2*len(set))
-	args = append(args, "install", "manifesto", "charts/manifesto", "-n", namespace, "--wait", "--timeout", "5m")
-	for _, s := range set {
-		args = append(args, "--set", s)
-	}
-	_, err = utils.Run(exec.Command("bin/helm", args...))
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install the Helm chart")
-}
-
 // expectServedThroughTraefik checks press routed the Gazette and that a
 // visitor reaching Traefik gets the Dispatch.
 func expectServedThroughTraefik() {
@@ -127,6 +108,26 @@ func expectServedThroughTraefik() {
 	By("not serving the Gazette on the plain HTTP listener, which press does not attach to")
 	code, _ := curlFrom(Default, "http://"+traefikService+"/posts/"+dispatchName)
 	Expect(code).To(Equal("404"))
+}
+
+// expectChartRoutes checks the routes the chart made for desk and darkroom:
+// accepted by Traefik, and served over HTTPS with the wildcard certificate.
+func expectChartRoutes() {
+	ip, err := utils.Run(exec.Command("kubectl", "get", "service", "traefik", "-n", "kube-system",
+		"-o", "jsonpath={.spec.clusterIP}"))
+	Expect(err).NotTo(HaveOccurred())
+	for _, c := range []struct{ component, host string }{{"desk", deskDomain}, {"darkroom", chartMediaDomain}} {
+		By("reaching " + c.component + " through the chart's route at " + c.host)
+		Eventually(func(g Gomega) {
+			out, err := utils.Run(exec.Command("kubectl", "get", "httproute", "manifesto-"+c.component, "-n", namespace,
+				"-o", `jsonpath={.status.parents[0].conditions[?(@.type=="Accepted")].status}`))
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(out).To(Equal("True"))
+			code, body := curlTLS(g, ip, "--cacert", "/tls/ca.crt", "https://"+c.host+"/healthz")
+			g.Expect(code).To(Equal("200"))
+			g.Expect(body).To(Equal("ok"))
+		}).Should(Succeed())
+	}
 }
 
 const tlsCurlPod = "curl-tls"
