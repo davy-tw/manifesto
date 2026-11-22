@@ -4,6 +4,7 @@ resources:
 - role_binding.yaml
 - deployment.yaml
 - service.yaml
+- pdb.yaml
 images:
 - name: herald
   newName: herald

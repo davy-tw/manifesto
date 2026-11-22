@@ -7,7 +7,9 @@ metadata:
   labels:
     {{- include "manifesto.componentLabels" (list $ "herald") | nindent 4 }}
 spec:
+  {{- if not $h.autoscaling.enabled }}
   replicas: {{ $h.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: manifesto
@@ -29,7 +31,12 @@ spec:
         image: {{ include "manifesto.image" (list $ $h.image) }}
         imagePullPolicy: {{ $h.image.pullPolicy }}
         command: [/manager]
-        args: [--bind-address=:8080]
+        args:
+        - --bind-address=:8080
+        - {{ printf "--cache-control=%s" (required "herald.cacheControl is required" $h.cacheControl) | quote }}
+        {{- range $h.extraArgs }}
+        - {{ . | quote }}
+        {{- end }}
         ports:
         - {name: http, containerPort: 8080, protocol: TCP}
         livenessProbe:
@@ -57,3 +64,53 @@ spec:
   selector:
     app.kubernetes.io/name: manifesto
     app.kubernetes.io/component: herald
+{{- if $h.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: manifesto-herald
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "herald") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: manifesto-herald
+  minReplicas: {{ $h.autoscaling.minReplicas }}
+  maxReplicas: {{ $h.autoscaling.maxReplicas }}
+  metrics:
+  {{- with $h.autoscaling.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: cpu
+      target: {type: Utilization, averageUtilization: {{ . }}}
+  {{- end }}
+  {{- with $h.autoscaling.targetMemoryUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: memory
+      target: {type: Utilization, averageUtilization: {{ . }}}
+  {{- end }}
+  {{- with $h.autoscaling.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if $h.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: manifesto-herald
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "manifesto.componentLabels" (list $ "herald") | nindent 4 }}
+spec:
+  maxUnavailable: {{ $h.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      app.kubernetes.io/component: herald
+{{- end }}

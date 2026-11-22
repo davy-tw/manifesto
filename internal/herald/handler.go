@@ -17,9 +17,26 @@ import (
 	"go.pkgs.davy.tw/manifesto/internal/domain"
 )
 
+// DefaultCacheControl lets browsers and shared caches store pages but
+// revalidate them on every request; the ETag makes that a cheap 304.
+const DefaultCacheControl = "no-cache"
+
 // Server serves the latest Snapshot.
 type Server struct {
+	// CacheControl is sent with every page, 404 and 410; empty means
+	// DefaultCacheControl. Pages carry an ETag computed from their content,
+	// so every replica answers conditional requests alike and a CDN can
+	// revalidate against any of them.
+	CacheControl string
+
 	snap atomic.Pointer[Snapshot]
+}
+
+func (s *Server) cacheControl() string {
+	if s.CacheControl == "" {
+		return DefaultCacheControl
+	}
+	return s.CacheControl
 }
 
 // Store replaces the snapshot being served.
@@ -33,6 +50,10 @@ func (s *Server) Snapshot() *Snapshot { return s.snap.Load() }
 // /sections/{name}, /stamps/{name}, /scribes/{name} (each with /page/{n}),
 // /wire.xml and /sitemap.xml.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/healthz", "/readyz":
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	switch r.URL.Path {
 	case "/healthz":
 		_, _ = w.Write([]byte("ok"))
@@ -53,11 +74,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	snap := s.Snapshot()
 	if snap == nil {
+		w.Header().Set("Cache-Control", "no-store")
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 	st := snap.sites[domain.Normalize(r.Host)]
 	if st == nil {
+		// Not cached: the domain may get a Gazette any moment.
+		w.Header().Set("Cache-Control", "no-store")
 		http.NotFound(w, r)
 		return
 	}
@@ -66,21 +90,27 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		e = entry{status: http.StatusNotFound}
 	}
-	serveEntry(w, r, e)
+	serveEntry(w, r, e, s.cacheControl())
 }
 
-func serveEntry(w http.ResponseWriter, r *http.Request, e entry) {
+func serveEntry(w http.ResponseWriter, r *http.Request, e entry, cacheControl string) {
+	h := w.Header()
 	if e.status != http.StatusOK || e.page == nil {
 		status := e.status
 		if status == http.StatusOK {
 			status = http.StatusServiceUnavailable
 		}
+		if status == http.StatusServiceUnavailable {
+			// A failed render may succeed on the next build.
+			h.Set("Cache-Control", "no-store")
+		} else {
+			h.Set("Cache-Control", cacheControl)
+		}
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
-	h := w.Header()
 	h.Set("ETag", e.page.ETag)
-	h.Set("Cache-Control", "no-cache")
+	h.Set("Cache-Control", cacheControl)
 	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, e.page.ETag) {
 		w.WriteHeader(http.StatusNotModified)
 		return

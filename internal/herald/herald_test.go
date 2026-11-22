@@ -196,6 +196,65 @@ func TestETag(t *testing.T) {
 	}
 }
 
+func TestCacheControl(t *testing.T) {
+	const cdn = "public, max-age=0, s-maxage=300, stale-if-error=86400"
+	snap := newBuilder(render.DefaultTheme()).Build(Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: []v1.Dispatch{
+		dispatch("hello", v1.PhasePublished, t0), dispatch("gone", v1.PhaseRetracted, t0),
+	}}, nil)
+	srv := &Server{CacheControl: cdn}
+	do := func(h, path string) *http.Response {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = h
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+	if got := do(host, "/").Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("before the first build: Cache-Control = %q, want no-store", got)
+	}
+	srv.Store(snap)
+	tests := []struct {
+		host, path string
+		status     int
+		want       string
+	}{
+		{host, "/", http.StatusOK, cdn},
+		{host, "/posts/hello", http.StatusOK, cdn},
+		{host, "/wire.xml", http.StatusOK, cdn},
+		{host, "/posts/missing", http.StatusNotFound, cdn},
+		{host, "/posts/gone", http.StatusGone, cdn},
+		{"unknown.example.io", "/", http.StatusNotFound, "no-store"},
+		{host, "/healthz", http.StatusOK, "no-store"},
+	}
+	for _, tt := range tests {
+		r := do(tt.host, tt.path)
+		if r.StatusCode != tt.status || r.Header.Get("Cache-Control") != tt.want {
+			t.Errorf("%s%s = %d, Cache-Control %q; want %d, %q", tt.host, tt.path, r.StatusCode, r.Header.Get("Cache-Control"), tt.status, tt.want)
+		}
+	}
+	if got := get(t, snap, host, "/", nil).Header.Get("Cache-Control"); got != DefaultCacheControl {
+		t.Errorf("default Cache-Control = %q", got)
+	}
+}
+
+// Replicas build their snapshots independently; a CDN revalidating against
+// any of them must get the same ETag for the same page.
+func TestETagIsTheSameOnEveryReplica(t *testing.T) {
+	in := Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: []v1.Dispatch{dispatch("hello", v1.PhasePublished, t0)}}
+	a := newBuilder(render.DefaultTheme()).Build(in, nil)
+	// The other replica saw an earlier version first.
+	older := in
+	older.Dispatches = []v1.Dispatch{dispatch("hello", v1.PhaseDraft, time.Time{})}
+	b := newBuilder(render.DefaultTheme())
+	bSnap := b.Build(in, b.Build(older, nil))
+	for _, path := range []string{"/", "/posts/hello", "/wire.xml", "/sitemap.xml"} {
+		ea, eb := get(t, a, host, path, nil).Header.Get("ETag"), get(t, bSnap, host, path, nil).Header.Get("ETag")
+		if ea == "" || ea != eb {
+			t.Errorf("%s: ETags %q and %q", path, ea, eb)
+		}
+	}
+}
+
 func TestUnchangedPagesAreReused(t *testing.T) {
 	b := newBuilder(render.DefaultTheme())
 	ds := []v1.Dispatch{dispatch("a", v1.PhasePublished, t0), dispatch("b", v1.PhasePublished, t0)}

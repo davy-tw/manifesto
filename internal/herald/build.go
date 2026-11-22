@@ -424,12 +424,16 @@ func (sb *siteBuilder) page(path, contentType, key string, renderFn func() ([]by
 	}
 	sb.out.pages[path] = entry{
 		status: http.StatusOK,
-		page:   &Page{Body: body, ETag: `"` + hash(key) + `"`, ContentType: contentType},
-		key:    key,
+		// The ETag is the content's, not the inputs': replicas, and herald
+		// versions that render differently during a rollout, agree on it.
+		page: &Page{Body: body, ETag: `"` + hashBytes(body) + `"`, ContentType: contentType},
+		key:  key,
 	}
 }
 
-func hash(s string) string {
-	sum := sha256.Sum256([]byte(s))
+func hash(s string) string { return hashBytes([]byte(s)) }
+
+func hashBytes(b []byte) string {
+	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:12])
 }

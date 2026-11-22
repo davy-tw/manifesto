@@ -27,8 +27,12 @@ import (
 )
 
 func main() {
-	var addr string
+	var addr, cacheControl string
 	flag.StringVar(&addr, "bind-address", ":8080", "The address the visitor site listens on.")
+	flag.StringVar(&cacheControl, "cache-control", herald.DefaultCacheControl,
+		"The Cache-Control header of pages, 404s and 410s. The default makes every cache revalidate with the ETag; "+
+			`for a CDN, e.g. "public, max-age=0, s-maxage=300, stale-while-revalidate=60, stale-if-error=86400" `+
+			"(changes then reach visitors up to s-maxage later).")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -48,7 +52,7 @@ func main() {
 	}
 
 	ctx := ctrl.SetupSignalHandler()
-	srv := &herald.Server{}
+	srv := &herald.Server{CacheControl: cacheControl}
 	builder := &herald.Builder{Theme: render.DefaultTheme(), Log: log}
 
 	go func() {

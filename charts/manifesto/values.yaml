@@ -77,7 +77,31 @@ herald:
     repository: manifesto-herald
     tag: ""
     pullPolicy: IfNotPresent
+  # herald keeps no state of its own; every replica watches the API server
+  # and holds every site's rendered pages in memory.
   replicas: 2
+  # cacheControl is sent with pages, 404s and 410s. The default makes
+  # browsers and CDNs revalidate every request with the page's ETag (a 304
+  # costs herald almost nothing). Behind a CDN, let it keep pages for a
+  # while, e.g. "public, max-age=0, s-maxage=300, stale-while-revalidate=60,
+  # stale-if-error=86400": changes then reach visitors up to s-maxage later.
+  cacheControl: no-cache
+  # autoscaling replaces replicas with a HorizontalPodAutoscaler (needs
+  # metrics-server, which k3s ships). Utilization is relative to
+  # resources.requests: raise requests.cpu to what one replica really uses
+  # before turning it on.
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: null
+    behavior: {}
+  # Keeps all but one replica serving while nodes are drained.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  extraArgs: []
   resources:
     limits: {cpu: 500m, memory: 256Mi}
     requests: {cpu: 10m, memory: 64Mi}

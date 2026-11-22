@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -305,6 +306,56 @@ func TestChartValues(t *testing.T) {
 			t.Error("no herald Service in the release namespace")
 		}
 	})
+}
+
+// TestChartHerald checks herald's caching and scaling values.
+func TestChartHerald(t *testing.T) {
+	t.Run("herald behind a CDN with autoscaling", func(t *testing.T) {
+		const cc = "public, max-age=0, s-maxage=300, stale-if-error=86400"
+		objs, err := helmTemplate(t, "desk.publicURL=https://d", "herald.cacheControl="+strings.ReplaceAll(cc, ",", `\,`),
+			"herald.autoscaling.enabled=true", "herald.autoscaling.maxReplicas=4",
+			"herald.autoscaling.targetMemoryUtilizationPercentage=80",
+			"herald.extraArgs={--zap-log-level=info}")
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := args(t, objs, "manifesto-herald")
+		for _, want := range []string{"--cache-control=" + cc, "--zap-log-level=info"} {
+			if !slices.Contains(a, want) {
+				t.Errorf("herald args %v lack %s", a, want)
+			}
+		}
+		if d := convert[appsv1.Deployment](t, objs["Deployment/"+ns+"/manifesto-herald"]); d.Spec.Replicas != nil {
+			t.Errorf("replicas = %d; the HorizontalPodAutoscaler owns them", *d.Spec.Replicas)
+		}
+		hpa := convert[autoscalingv2.HorizontalPodAutoscaler](t, objs["HorizontalPodAutoscaler/"+ns+"/manifesto-herald"])
+		if hpa.Spec.ScaleTargetRef.Name != "manifesto-herald" || *hpa.Spec.MinReplicas != 2 ||
+			hpa.Spec.MaxReplicas != 4 || len(hpa.Spec.Metrics) != 2 {
+			t.Errorf("HorizontalPodAutoscaler spec = %+v", hpa.Spec)
+		}
+		if objs["PodDisruptionBudget/"+ns+"/manifesto-herald"] == nil {
+			t.Error("no PodDisruptionBudget for herald")
+		}
+	})
+
+	t.Run("herald defaults", func(t *testing.T) {
+		objs, err := helmTemplate(t, "desk.publicURL=https://d", "herald.podDisruptionBudget.enabled=false")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a := args(t, objs, "manifesto-herald"); !slices.Contains(a, "--cache-control=no-cache") {
+			t.Errorf("herald args %v", a)
+		}
+		d := convert[appsv1.Deployment](t, objs["Deployment/"+ns+"/manifesto-herald"])
+		if d.Spec.Replicas == nil || *d.Spec.Replicas != 2 {
+			t.Errorf("replicas = %v, want 2", d.Spec.Replicas)
+		}
+		if objs["HorizontalPodAutoscaler/"+ns+"/manifesto-herald"] != nil ||
+			objs["PodDisruptionBudget/"+ns+"/manifesto-herald"] != nil {
+			t.Error("HorizontalPodAutoscaler or disabled PodDisruptionBudget rendered")
+		}
+	})
+
 }
 
 func bufioReader(b []byte) *bufio.Reader { return bufio.NewReader(bytes.NewReader(b)) }
