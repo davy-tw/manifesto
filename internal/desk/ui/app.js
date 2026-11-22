@@ -103,12 +103,25 @@ function chooseNamespace() {
       if (ns) location.hash = open(ns);
     },
   }, input, h('button', { type: 'submit', class: 'primary' }, 'Open'));
-  const gazettes = h('div', { class: 'gazettes' }, h('p', { class: 'muted' }, 'Looking for publications…'));
-  const signal = show(
-    h('h1', {}, 'Choose a publication'),
-    gazettes,
-    recent.length ? h('section', {}, h('h2', {}, 'Recent'), h('ul', { class: 'recent' }, recent.map((n) => h('li', {}, h('a', { href: open(n) }, n))))) : null,
-  );
+  const gazettes = h('div', { class: 'gazettes' }, h('p', { class: 'muted', role: 'status' }, 'Looking for publications…'));
+  const recentList = (skip = new Set()) => {
+    const names = recent.filter((n) => !skip.has(n));
+    return names.length
+      ? h('section', {}, h('h2', {}, 'Recent'), h('ul', { class: 'recent' }, names.map((n) => h('li', {}, h('a', { href: open(n) }, n)))))
+      : null;
+  };
+  const recentSection = h('div', {});
+  const askForNamespace = (...before) => {
+    gazettes.replaceChildren(...before, h('p', {}, 'Enter the namespace of the Gazette you write for.'), form);
+    recentSection.replaceChildren(...[recentList()].filter(Boolean));
+    input.focus();
+  };
+  const signal = show(h('h1', {}, 'Choose a publication'), gazettes, recentSection);
+  if (listRefused()) {
+    // Refused earlier in this session: do not ask the API server again.
+    askForNamespace();
+    return;
+  }
   api.listCluster('gazettes').then((items) => {
     if (signal.aborted) return;
     const byNS = new Map();
@@ -118,9 +131,11 @@ function chooseNamespace() {
       byNS.get(ns).push(g);
     }
     if (!byNS.size) {
-      gazettes.replaceChildren(h('p', {}, 'There are no Gazettes yet. Enter the namespace to write in.'), form);
+      askForNamespace(h('p', {}, 'There are no Gazettes yet.'));
       return;
     }
+    // A namespace's dispatches are not filtered by Gazette, so only the
+    // namespace links; its Gazettes are listed to recognize it.
     gazettes.replaceChildren(
       ...[...byNS.keys()].sort().map((ns) =>
         h('section', { class: 'namespace' },
@@ -128,23 +143,43 @@ function chooseNamespace() {
           h('ul', {}, byNS.get(ns)
             .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name))
             .map((g) => h('li', {},
-              h('a', { href: open(ns) }, g.spec.title || g.metadata.name),
+              g.spec.title || g.metadata.name,
               g.spec.domain ? h('span', { class: 'muted' }, ` ${g.spec.domain}`) : null))),
         ),
       ),
       h('p', {}, 'Or enter another namespace:'),
       form,
     );
+    recentSection.replaceChildren(...[recentList(new Set(byNS.keys()))].filter(Boolean));
   }).catch((err) => {
     if (signal.aborted) return;
     if (err.status === 403) {
       // Not allowed to list every namespace: that is the usual case.
-      gazettes.replaceChildren(h('p', {}, 'Enter the namespace of the Gazette you write for.'), form);
+      rememberListRefused();
+      askForNamespace();
     } else {
-      gazettes.replaceChildren(failure(err), h('p', {}, 'Enter the namespace of the Gazette you write for.'), form);
+      askForNamespace(failure(err));
     }
-    input.focus();
   });
+}
+
+// The cluster-wide Gazette list is refused to most authors. Remember that
+// for the browser session, so the home page does not ask (and the API
+// server does not audit a refusal) every time.
+const LIST_REFUSED = 'manifesto.gazetteListRefused';
+function listRefused() {
+  try {
+    return sessionStorage.getItem(LIST_REFUSED) === '1';
+  } catch {
+    return false;
+  }
+}
+function rememberListRefused() {
+  try {
+    sessionStorage.setItem(LIST_REFUSED, '1');
+  } catch {
+    // storage unavailable
+  }
 }
 
 // --- dispatches ----------------------------------------------------------------
