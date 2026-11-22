@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -220,6 +221,18 @@ spec:
 			g.Expect(code).To(Equal("200"))
 			g.Expect(body).To(Equal(s3Body))
 		}).Should(Succeed())
+
+		By("replaying the upload URL, which must not replace the verified file")
+		replay := exec.Command("kubectl", "exec", "-i", heraldCurlPod, "-n", namespace, "--",
+			"curl", "-sf", "-X", "PUT", "-H", "Content-Type: text/plain", "--data-binary", "@-", uploadURL)
+		replay.Stdin = strings.NewReader(strings.Repeat("x", len(s3Body)))
+		_, err = utils.Run(replay)
+		Expect(err).NotTo(HaveOccurred(), "the presigned URL lands in staging and stays usable")
+		Consistently(func(g Gomega) {
+			code, body := curlFrom(g, fileURL)
+			g.Expect(code).To(Equal("200"))
+			g.Expect(body).To(Equal(s3Body))
+		}, 10*time.Second, 2*time.Second).Should(Succeed())
 	})
 }
 

@@ -333,7 +333,7 @@ status:
 - press 無法得知上傳何時完成，Pending 的 Print 每 2 秒檢查一次，直到上傳網址到期；到期仍未上傳就設成 `Failed`
 - Print 不存在或還沒 Ready 時，Markdown 裡的圖片會被移除、連結只留文字，Dispatch 的 `Ready` 回報 `PrintNotReady`
 
-**S3 後端**只用標準 S3 API：presigned `PutObject`（只簽入 Content-Type，上傳者只需帶這個 header；長期快取由 `publicURL` 前的 CDN 或路由設定）、`HeadObject`、`GetObject`、`DeleteObject`、`HeadBucket`。S3 無法在上傳時驗證內容，press 第一次看到物件時下載並核對大小與 sha256，不符就刪除並回報 `UploadRejected`；核對過的物件記在記憶體中，不重複下載。憑證放在 Secret（`accessKeyID`、`secretAccessKey`），press 直接向 API server 讀取，不快取、不監看所有 Secret，只需要 `get` 權限。
+**S3 後端**只用標準 S3 API：presigned `PutObject`（只簽入 Content-Type，上傳者只需帶這個 header；長期快取由 `publicURL` 前的 CDN 或路由設定）、`HeadObject`、`GetObject`、`CopyObject`、`DeleteObject`、`HeadBucket`。presigned URL 無法撤銷，到期前可以重複使用，而且能讀 Print 的人（包括 proofreader）都看得到，所以上傳網址簽給暫存 key `staging/<object key>`，不是訪客讀取的 key。S3 無法在上傳時驗證內容，press 下載暫存檔核對大小與 sha256（`GetObject` 帶 `If-Match`，確保核對的就是 HEAD 看到的版本），相符才 `CopyObject`（帶 `x-amz-copy-source-if-match`）到正式 key 並刪除暫存檔，不符就刪除並回報 `UploadRejected`。正式 key 只有 press 會寫入；複製後的 ETag 和核對過的不同時（服務不支援條件複製，或加密讓 ETag 不是 MD5），press 再下載正式檔核對一次。重放上傳網址只會寫到暫存 key，刪除 Print 時一併清掉；bucket 可以另設 lifecycle rule 讓 `staging/` 下的物件一天後過期。press 重啟後第一次看到正式檔仍會重新核對，核對過的物件記在記憶體中，不重複下載。憑證放在 Secret（`accessKeyID`、`secretAccessKey`），press 直接向 API server 讀取，不快取、不監看所有 Secret，只需要 `get` 權限。
 
 文章內容存在 etcd，所以備份媒體時 etcd 也要一起備份。
 
