@@ -71,12 +71,15 @@ spec:
         {{- else }}
         - --listener-https-port={{ $r.listenerHTTPSPort }}
         - --listener-http-port={{ $r.listenerHTTPPort }}
-        {{- include "manifesto.validateTLS" $ }}
+        {{- include "manifesto.validateListeners" $ }}
         - --listener-tls-certificates={{ $r.tls.certificateRefs }}
         {{- with $r.tls.sharedSecret }}
         - --listener-tls-secret={{ . }}
         {{- end }}
-        {{- /* Quoted: option values may hold YAML syntax (": ", "#"). */}}
+        {{- /* Quoted: values may hold YAML syntax (": ", "#"). */}}
+        {{- range $k, $v := $r.listenerSetAnnotations }}
+        - {{ printf "--listener-annotation=%s=%s" $k (toString $v) | quote }}
+        {{- end }}
         {{- range $k, $v := $r.tls.options }}
         - {{ printf "--listener-tls-option=%s=%s" $k (toString $v) | quote }}
         {{- end }}

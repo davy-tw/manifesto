@@ -53,7 +53,7 @@ helm install manifesto oci://ghcr.io/davy-tw/charts/manifesto --version <X.Y.Z> 
 | 值 | 說明 |
 |---|---|
 | `imageRegistry`、`<元件>.image.repository/tag` | image 位置，預設 `ghcr.io/davy-tw/manifesto-<元件>`；tag 預設是 chart 的 appVersion |
-| `press.routing.*` | Gateway 路由（`gatewayName`、`gatewayNamespace`、`mode`、`gatewaySection`、`listenerHTTPSPort`、`listenerHTTPPort`、`clusterIssuer`、`tls`）；`tls` 見下方「listener 的 TLS」 |
+| `press.routing.*` | Gateway 路由（`gatewayName`、`gatewayNamespace`、`mode`、`gatewaySection`、`listenerHTTPSPort`、`listenerHTTPPort`、`clusterIssuer`、`listenerSetAnnotations`、`tls`）；`tls` 見下方「listener 的 TLS」 |
 | `press.editions`、`press.editionBytes` | 每篇保留的 Edition 數與內容總量上限（預設 20 版、2Mi），避免修訂版本塞滿 etcd |
 | `darkroom.enabled`、`darkroom.persistence.*` | 媒體（pvc Archive）與它的 PVC；全部用 S3 時可以關掉 |
 | `desk.publicURL`、`desk.oidc.*`、`desk.tokenSignIn` | desk 的網址與登入方式 |
@@ -153,6 +153,7 @@ press 第一次啟動會在 `manifesto-system` 建立簽章用的 Secret `manife
 | `--listener-tls-certificates` | `listenerset` 模式下 HTTPS listener 的憑證：`perGazette`（預設）、`shared` 或 `none`，見下方 |
 | `--listener-tls-secret` | `shared` 時所有 listener 共用的 Secret，`<namespace>/<name>` |
 | `--listener-tls-option` | `key=value`，原樣寫進每個 HTTPS listener 的 `tls.options`，可重複 |
+| `--listener-annotation` | `key=value`，原樣寫進每個 ListenerSet 的 `metadata.annotations`，可重複；給會讀 ListenerSet annotation 的 controller 用。`cert-manager.io/` 開頭的 key 不能和 `--cluster-issuer` 並用 |
 | `--cluster-issuer` | 選用。cert-manager 的 ClusterIssuer；設定後 press 替每個網域建立 `Certificate`（只能搭配 `perGazette`） |
 | `--herald-service`、`--herald-port` | herald 的 Service，預設 `manifesto-system/manifesto-herald:80` |
 

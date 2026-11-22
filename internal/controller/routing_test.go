@@ -142,6 +142,21 @@ var _ = Describe("Gazette routing", func() {
 			tlsGrant(types.NamespacedName{Namespace: secretNS, Name: "wildcard"}, ns))).To(Succeed())
 	})
 
+	It("drops ListenerSet annotations removed from the configuration", func() {
+		ns := newNamespace()
+		g := newGazette(ns, "annotated", "annotated."+ns+".example.io")
+		rt := testRouting
+		rt.ListenerSetAnnotations = map[string]string{"example.io/a": "1", "example.io/b": "2"}
+		r := &GazetteReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Routing: rt}
+		Expect(r.apply(ctx, nil, r.listenerSet(g))).To(Succeed())
+		delete(r.Routing.ListenerSetAnnotations, "example.io/b")
+		ls := r.listenerSet(g)
+		Expect(r.apply(ctx, nil, ls)).To(Succeed())
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(ls), ls)).To(Succeed())
+		Expect(ls.Annotations).To(HaveKeyWithValue("example.io/a", "1"))
+		Expect(ls.Annotations).NotTo(HaveKey("example.io/b"))
+	})
+
 	It("does not route a Gazette that claims a reserved domain", func() {
 		g := newGazette(newNamespace(), "squatter", "desk.reserved.test")
 		Expect(k8sClient.Create(ctx, g)).To(Succeed())

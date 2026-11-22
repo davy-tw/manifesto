@@ -110,6 +110,19 @@ func main() {
 			"implementation provides them, as --listener-tls-option tells it).")
 	flag.StringVar(&tlsSecret, "listener-tls-secret", "",
 		"With --listener-tls-certificates=shared, the Secret every HTTPS listener uses, as namespace/name.")
+	flag.Func("listener-annotation",
+		"In listenerset mode, a key=value added to the annotations of every ListenerSet. Repeatable.",
+		func(v string) error {
+			k, val, ok := strings.Cut(v, "=")
+			if !ok || k == "" {
+				return fmt.Errorf("want key=value, got %q", v)
+			}
+			if routing.ListenerSetAnnotations == nil {
+				routing.ListenerSetAnnotations = map[string]string{}
+			}
+			routing.ListenerSetAnnotations[k] = val
+			return nil
+		})
 	flag.Func("listener-tls-option",
 		"In listenerset mode, a key=value added to each HTTPS listener's tls.options. Repeatable.",
 		func(v string) error {
@@ -179,7 +192,7 @@ func main() {
 		os.Exit(1)
 	}
 	if err := routing.Validate(); err != nil {
-		setupLog.Error(err, "Invalid listener TLS flags")
+		setupLog.Error(err, "Invalid listener flags")
 		os.Exit(1)
 	}
 

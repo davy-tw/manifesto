@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -335,8 +336,10 @@ func TestChartRoutes(t *testing.T) {
 					SharedSecret: types.NamespacedName{Namespace: "certs", Name: "wildcard"},
 					Options:      map[string]string{"example.io/profile": "modern"}}}},
 		{"listenerset mode with certificates from the Gateway", []string{"press.routing.tls.certificateRefs=none",
-			`press.routing.tls.options.example\.io/certificates=managed`},
+			`press.routing.tls.options.example\.io/certificates=managed`,
+			`press.routing.listenerSetAnnotations.example\.io/policy=a: b #c`},
 			controller.Routing{Mode: controller.ModeListenerSet, Gateway: gateway, HTTPSPort: 443, HTTPPort: 80,
+				ListenerSetAnnotations: map[string]string{"example.io/policy": "a: b #c"},
 				TLS: controller.ListenerTLS{Certificates: controller.TLSNone,
 					Options: map[string]string{"example.io/certificates": "managed"}}}},
 	}
@@ -365,6 +368,9 @@ func TestChartRoutes(t *testing.T) {
 					b, _ := yaml.Marshal(w.Object["spec"])
 					if !bytes.Equal(a, b) {
 						t.Errorf("%s: spec differs from press\nchart:\n%s\npress:\n%s", k, a, b)
+					}
+					if !maps.Equal(got.GetAnnotations(), w.GetAnnotations()) {
+						t.Errorf("%s annotations = %v, press sets %v", k, got.GetAnnotations(), w.GetAnnotations())
 					}
 					if got.GetLabels()["app.kubernetes.io/component"] != component {
 						t.Errorf("%s labels = %v", k, got.GetLabels())
@@ -461,14 +467,16 @@ func TestChartRouteTLS(t *testing.T) {
 		"press.routing.tls.certificateRefs=shared", "press.routing.tls.sharedSecret=certs/wildcard",
 		`press.routing.tls.options.example\.io/profile=modern`,
 		// YAML syntax and numbers in values must come through as strings.
-		`press.routing.tls.options.example\.io/note=a: b #c`, `press.routing.tls.options.example\.io/n=3`)...)
+		`press.routing.tls.options.example\.io/note=a: b #c`, `press.routing.tls.options.example\.io/n=3`,
+		`press.routing.listenerSetAnnotations.example\.io/policy=strict`)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := args(t, objs, "manifesto-controller-manager")
 	for _, want := range []string{"--listener-http-port=0", "--listener-tls-certificates=shared",
 		"--listener-tls-secret=certs/wildcard", "--listener-tls-option=example.io/profile=modern",
-		"--listener-tls-option=example.io/note=a: b #c", "--listener-tls-option=example.io/n=3"} {
+		"--listener-tls-option=example.io/note=a: b #c", "--listener-tls-option=example.io/n=3",
+		"--listener-annotation=example.io/policy=strict"} {
 		if !slices.Contains(a, want) {
 			t.Errorf("press args %v lack %s", a, want)
 		}
@@ -523,6 +531,11 @@ func TestChartRouteErrors(t *testing.T) {
 			"options must tell the Gateway"},
 		{"checks option keys", append(slices.Clone(base), `press.routing.tls.options.Example\.io/x=y`),
 			"is not valid"},
+		{"checks annotation keys", append(slices.Clone(base), "press.routing.listenerSetAnnotations.a b=c"),
+			"listenerSetAnnotations key"},
+		{"keeps cert-manager annotations from the ClusterIssuer", append(slices.Clone(base),
+			"press.routing.clusterIssuer=le", `press.routing.listenerSetAnnotations.cert-manager\.io/cluster-issuer=le`),
+			"conflicts with clusterIssuer"},
 		{"keeps the ClusterIssuer to perGazette", append(slices.Clone(base), "press.routing.clusterIssuer=le",
 			"press.routing.tls.certificateRefs=shared", "press.routing.tls.sharedSecret=certs/wildcard"),
 			"clusterIssuer only works"},

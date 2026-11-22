@@ -223,6 +223,13 @@ func TestRoutingValidate(t *testing.T) {
 		{"unknown", Routing{Gateway: gw, TLS: ListenerTLS{Certificates: "wildcard"}}, true},
 		{"bad option key", Routing{Gateway: gw, TLS: ListenerTLS{Options: map[string]string{"Example.io/x": "y"}}}, true},
 		{"too many options", Routing{Gateway: gw, TLS: ListenerTLS{Options: manyOptions(17)}}, true},
+		{"annotations", Routing{Gateway: gw, ListenerSetAnnotations: map[string]string{
+			"example.io/policy": "x", "cert-manager.io/cluster-issuer": "le"}}, false},
+		{"bad annotation key", Routing{Gateway: gw, ListenerSetAnnotations: map[string]string{"a b": "x"}}, true},
+		{"cert-manager annotation with a ClusterIssuer", Routing{Gateway: gw, ClusterIssuer: "le",
+			ListenerSetAnnotations: map[string]string{"cert-manager.io/cluster-issuer": "le"}}, true},
+		{"other annotation with a ClusterIssuer", Routing{Gateway: gw, ClusterIssuer: "le",
+			ListenerSetAnnotations: map[string]string{"example.io/policy": "x"}}, false},
 		{"as many options as fit", Routing{Gateway: gw, TLS: ListenerTLS{Options: manyOptions(16)}}, false},
 	}
 	for _, tt := range tests {
@@ -329,4 +336,19 @@ func manyOptions(n int) map[string]string {
 		m[fmt.Sprintf("example.io/option-%d", i)] = "on"
 	}
 	return m
+}
+
+func TestListenerSetAnnotations(t *testing.T) {
+	ann := map[string]string{"example.io/policy": "strict"}
+	ls := (&GazetteReconciler{Routing: Routing{ListenerSetAnnotations: ann}}).listenerSet(routingGazette())
+	if ls.Annotations["example.io/policy"] != "strict" {
+		t.Errorf("annotations = %v", ls.Annotations)
+	}
+	ann["example.io/policy"] = "changed"
+	if ls.Annotations["example.io/policy"] != "strict" {
+		t.Error("the ListenerSet shares its annotations map with the configuration")
+	}
+	if ls := (&GazetteReconciler{}).listenerSet(routingGazette()); ls.Annotations != nil {
+		t.Errorf("annotations = %v, want none", ls.Annotations)
+	}
 }

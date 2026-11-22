@@ -79,10 +79,10 @@ namespace and adding the chart's labels: (list $ "files/rbac.yaml" annotations).
 {{- end }}
 
 {{/*
-Fails on press.routing.tls settings press would refuse to start with (see
-controller.Routing.Validate).
+Fails on press.routing listener settings (tls, listenerSetAnnotations) press
+would refuse to start with (see controller.Routing.Validate).
 */}}
-{{- define "manifesto.validateTLS" -}}
+{{- define "manifesto.validateListeners" -}}
 {{- $r := .Values.press.routing -}}
 {{- $t := $r.tls -}}
 {{- if not (has $t.certificateRefs (list "perGazette" "shared" "none")) }}{{ fail (printf "press.routing.tls.certificateRefs must be perGazette, shared or none, got %q" $t.certificateRefs) }}{{ end -}}
@@ -91,6 +91,10 @@ controller.Routing.Validate).
 {{- if gt (len $t.options) 16 }}{{ fail (printf "press.routing.tls.options takes at most 16 entries, got %d" (len $t.options)) }}{{ end -}}
 {{- range $k, $_ := $t.options }}
 {{- if not (regexMatch "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]$" $k) }}{{ fail (printf "press.routing.tls.options key %q is not valid, use e.g. example.io/option" $k) }}{{ end -}}
+{{- end }}
+{{- range $k, $_ := $r.listenerSetAnnotations }}
+{{- if not (regexMatch "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$" $k) }}{{ fail (printf "press.routing.listenerSetAnnotations key %q is not valid, use e.g. example.io/annotation" $k) }}{{ end -}}
+{{- if and $r.clusterIssuer (hasPrefix "cert-manager.io/" $k) }}{{ fail (printf "press.routing.listenerSetAnnotations %s conflicts with clusterIssuer: use one of them to get certificates" $k) }}{{ end -}}
 {{- end }}
 {{- if and $r.clusterIssuer (ne $t.certificateRefs "perGazette") }}{{ fail "press.routing.clusterIssuer only works with tls.certificateRefs: perGazette" }}{{ end -}}
 {{- end }}

@@ -9,6 +9,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -63,6 +65,10 @@ type Routing struct {
 	// NoHTTP leaves out the ListenerSet's HTTP listener and its redirect
 	// HTTPRoute, for Gateways that serve HTTPS only.
 	NoHTTP bool
+	// ListenerSetAnnotations are written as they are into the metadata of
+	// every ListenerSet, for controllers that read them (for example a
+	// certificate controller). Removing one removes it from the ListenerSets.
+	ListenerSetAnnotations map[string]string
 	// TLS configures the ListenerSet's HTTPS listener.
 	TLS ListenerTLS
 	// ClusterIssuer is the cert-manager ClusterIssuer that signs each
@@ -141,6 +147,17 @@ func (r Routing) Validate() error {
 		}
 		if len(v) > 4096 {
 			return fmt.Errorf("TLS option %s is longer than 4096 bytes", k)
+		}
+	}
+	for k := range r.ListenerSetAnnotations {
+		if errs := validation.IsQualifiedName(strings.ToLower(k)); len(errs) > 0 {
+			return fmt.Errorf("ListenerSet annotation key %q: %s", k, strings.Join(errs, "; "))
+		}
+		if r.ClusterIssuer != "" && strings.HasPrefix(k, "cert-manager.io/") {
+			// cert-manager would issue its own Certificate for the Secret
+			// press's Certificate already fills.
+			return fmt.Errorf("ListenerSet annotation %s conflicts with the ClusterIssuer: "+
+				"use one of them to get certificates", k)
 		}
 	}
 	if r.ClusterIssuer != "" && r.TLS.mode() != TLSPerGazette {
@@ -325,8 +342,12 @@ func (r *GazetteReconciler) listenerSet(g *v1.Gazette) *gatewayv1.ListenerSet {
 			Name: listenerHTTP, Hostname: &host, Port: httpPort, Protocol: gatewayv1.HTTPProtocolType, AllowedRoutes: same,
 		})
 	}
+	var annotations map[string]string
+	if len(r.Routing.ListenerSetAnnotations) > 0 {
+		annotations = maps.Clone(r.Routing.ListenerSetAnnotations)
+	}
 	return &gatewayv1.ListenerSet{
-		Namespace: g.Namespace, Name: routingName(g.Name),
+		Namespace: g.Namespace, Name: routingName(g.Name), Annotations: annotations,
 		Spec: gatewayv1.ListenerSetSpec{
 			ParentRef: gatewayv1.ParentGatewayReference{
 				Name:      gatewayv1.ObjectName(r.Routing.Gateway.Name),

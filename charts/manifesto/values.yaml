@@ -40,6 +40,11 @@ press:
     listenerHTTPSPort: 443
     listenerHTTPPort: 80
     clusterIssuer: ""
+    # listenerset mode: annotations on every ListenerSet (press's and the
+    # chart's desk and darkroom ones), for controllers that read them, e.g.
+    # a certificate controller. Keys under cert-manager.io/ cannot be
+    # combined with clusterIssuer.
+    listenerSetAnnotations: {}
     # listenerset mode: TLS of each HTTPS listener, the chart's desk and
     # darkroom routes included.
     tls:

@@ -32,7 +32,7 @@ With route.parentRefs only the HTTPRoute is created, attached there.
 {{- if and $listenerSet (ne (urlParse $url).scheme "https") }}{{ fail (printf "%s.route in listenerset mode serves HTTPS and redirects HTTP to it, so publicURL must be https://, got %q" $component $url) }}{{ end -}}
 {{- $labels := include "manifesto.componentLabels" (list $root $component) -}}
 {{- if $listenerSet }}
-{{- include "manifesto.validateTLS" $root }}
+{{- include "manifesto.validateListeners" $root }}
 {{- $tls := $r.tls }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -42,6 +42,12 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- $labels | nindent 4 }}
+  {{- with $r.listenerSetAnnotations }}
+  annotations:
+    {{- range $k, $v := . }}
+    {{ $k | quote }}: {{ toString $v | quote }}
+    {{- end }}
+  {{- end }}
 spec:
   parentRef:
     name: {{ $r.gatewayName }}
