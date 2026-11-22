@@ -312,9 +312,7 @@ func bufioReader(b []byte) *bufio.Reader { return bufio.NewReader(bytes.NewReade
 // applies for a Gazette of that hostname in the release namespace, in both
 // routing modes, unless parentRefs takes over.
 func TestChartRoutes(t *testing.T) {
-	base := []string{"desk.publicURL=https://desk.example.io", "desk.route.enabled=true",
-		"darkroom.publicURL=https://media.example.io:8443", "darkroom.route.enabled=true",
-		"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}
+	base := chartRouteBase
 	gateway := types.NamespacedName{Namespace: "infra", Name: "gw"}
 
 	modes := []struct {
@@ -329,6 +327,18 @@ func TestChartRoutes(t *testing.T) {
 		{"listenerset mode with cert-manager", []string{"press.routing.clusterIssuer=letsencrypt"},
 			controller.Routing{Mode: controller.ModeListenerSet, Gateway: gateway, HTTPSPort: 443, HTTPPort: 80,
 				ClusterIssuer: "letsencrypt"}},
+		{"listenerset mode with a shared Secret and HTTPS only", []string{"press.routing.listenerHTTPPort=0",
+			"press.routing.tls.certificateRefs=shared", "press.routing.tls.sharedSecret=certs/wildcard",
+			`press.routing.tls.options.example\.io/profile=modern`},
+			controller.Routing{Mode: controller.ModeListenerSet, Gateway: gateway, HTTPSPort: 443, NoHTTP: true,
+				TLS: controller.ListenerTLS{Certificates: controller.TLSShared,
+					SharedSecret: types.NamespacedName{Namespace: "certs", Name: "wildcard"},
+					Options:      map[string]string{"example.io/profile": "modern"}}}},
+		{"listenerset mode with certificates from the Gateway", []string{"press.routing.tls.certificateRefs=none",
+			`press.routing.tls.options.example\.io/certificates=managed`},
+			controller.Routing{Mode: controller.ModeListenerSet, Gateway: gateway, HTTPSPort: 443, HTTPPort: 80,
+				TLS: controller.ListenerTLS{Certificates: controller.TLSNone,
+					Options: map[string]string{"example.io/certificates": "managed"}}}},
 	}
 	for _, m := range modes {
 		t.Run(m.name, func(t *testing.T) {
@@ -436,7 +446,53 @@ func TestChartRoutes(t *testing.T) {
 			t.Error("darkroom's route rendered while darkroom is disabled")
 		}
 	})
+}
 
+// chartRouteBase enables both routes in listenerset mode.
+var chartRouteBase = []string{"desk.publicURL=https://desk.example.io", "desk.route.enabled=true",
+	"darkroom.publicURL=https://media.example.io:8443", "darkroom.route.enabled=true",
+	"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}
+
+// TestChartRouteTLS checks press.routing.tls reaches press and the shared
+// Secret's grant for the chart's ListenerSets.
+func TestChartRouteTLS(t *testing.T) {
+	base := chartRouteBase
+	objs, err := helmTemplate(t, append(slices.Clone(base), "press.routing.listenerHTTPPort=0",
+		"press.routing.tls.certificateRefs=shared", "press.routing.tls.sharedSecret=certs/wildcard",
+		`press.routing.tls.options.example\.io/profile=modern`)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := args(t, objs, "manifesto-controller-manager")
+	for _, want := range []string{"--listener-http-port=0", "--listener-tls-certificates=shared",
+		"--listener-tls-secret=certs/wildcard", "--listener-tls-option=example.io/profile=modern"} {
+		if !slices.Contains(a, want) {
+			t.Errorf("press args %v lack %s", a, want)
+		}
+	}
+	u := objs["ReferenceGrant/certs/manifesto."+ns+".tls"]
+	if u == nil {
+		t.Fatal("no ReferenceGrant for the shared Secret")
+	}
+	g := convert[gatewayv1.ReferenceGrant](t, u)
+	if len(g.Spec.From) != 1 || g.Spec.From[0].Kind != "ListenerSet" || string(g.Spec.From[0].Namespace) != ns ||
+		len(g.Spec.To) != 1 || g.Spec.To[0].Kind != "Secret" || *g.Spec.To[0].Name != "wildcard" {
+		t.Errorf("grant spec = %+v", g.Spec)
+	}
+
+	objs, err = helmTemplate(t, base...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, o := range objs {
+		if o.GetKind() == "ReferenceGrant" {
+			t.Errorf("%s rendered without shared certificates", k)
+		}
+	}
+}
+
+func TestChartRouteErrors(t *testing.T) {
+	base := chartRouteBase
 	for _, tc := range []struct {
 		name string
 		set  []string
@@ -452,6 +508,15 @@ func TestChartRoutes(t *testing.T) {
 			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "publicURL must be https://"},
 		{"needs a lower-case hostname", []string{"desk.publicURL=https://D.example.io", "desk.route.enabled=true",
 			"press.routing.gatewayName=gw", "press.routing.gatewayNamespace=infra"}, "needs a lower-case hostname"},
+		{"knows the TLS modes", append(slices.Clone(base), "press.routing.tls.certificateRefs=wildcard"),
+			"must be perGazette, shared or none"},
+		{"needs the shared Secret", append(slices.Clone(base), "press.routing.tls.certificateRefs=shared"),
+			"sharedSecret is required"},
+		{"needs options without certificates", append(slices.Clone(base), "press.routing.tls.certificateRefs=none"),
+			"options must tell the Gateway"},
+		{"keeps the ClusterIssuer to perGazette", append(slices.Clone(base), "press.routing.clusterIssuer=le",
+			"press.routing.tls.certificateRefs=shared", "press.routing.tls.sharedSecret=certs/wildcard"),
+			"clusterIssuer only works"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := helmTemplate(t, tc.set...); err == nil || !strings.Contains(err.Error(), tc.want) {

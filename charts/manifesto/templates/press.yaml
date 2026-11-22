@@ -71,6 +71,14 @@ spec:
         {{- else }}
         - --listener-https-port={{ $r.listenerHTTPSPort }}
         - --listener-http-port={{ $r.listenerHTTPPort }}
+        {{- include "manifesto.validateTLS" $ }}
+        - --listener-tls-certificates={{ $r.tls.certificateRefs }}
+        {{- with $r.tls.sharedSecret }}
+        - --listener-tls-secret={{ . }}
+        {{- end }}
+        {{- range $k, $v := $r.tls.options }}
+        - --listener-tls-option={{ $k }}={{ $v }}
+        {{- end }}
         {{- with $r.clusterIssuer }}
         - --cluster-issuer={{ . }}
         {{- end }}

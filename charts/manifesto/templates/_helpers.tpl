@@ -77,3 +77,16 @@ namespace and adding the chart's labels: (list $ "files/rbac.yaml" annotations).
 {{- define "manifesto.host" -}}
 {{- regexReplaceAll ":[0-9]+$" (urlParse .).host "" -}}
 {{- end }}
+
+{{/*
+Fails on press.routing.tls settings press would refuse to start with (see
+controller.Routing.Validate).
+*/}}
+{{- define "manifesto.validateTLS" -}}
+{{- $r := .Values.press.routing -}}
+{{- $t := $r.tls -}}
+{{- if not (has $t.certificateRefs (list "perGazette" "shared" "none")) }}{{ fail (printf "press.routing.tls.certificateRefs must be perGazette, shared or none, got %q" $t.certificateRefs) }}{{ end -}}
+{{- if and (eq $t.certificateRefs "shared") (not (regexMatch "^[^/]+/[^/]+$" $t.sharedSecret)) }}{{ fail "press.routing.tls.sharedSecret is required as <namespace>/<name> with certificateRefs: shared" }}{{ end -}}
+{{- if and (eq $t.certificateRefs "none") (not $t.options) }}{{ fail "press.routing.tls.options must tell the Gateway where to get certificates with certificateRefs: none" }}{{ end -}}
+{{- if and $r.clusterIssuer (ne $t.certificateRefs "perGazette") }}{{ fail "press.routing.clusterIssuer only works with tls.certificateRefs: perGazette" }}{{ end -}}
+{{- end }}

@@ -7,6 +7,10 @@ default parentRefs they attach where press attaches Gazettes:
 - listenerset mode: a ListenerSet with the hostname's HTTPS and HTTP
   listeners, the HTTPRoute on its HTTPS listener, a redirect HTTPRoute on its
   HTTP listener, and a cert-manager Certificate when clusterIssuer is set.
+  press.routing.tls sets the HTTPS listener's certificates and options;
+  listenerHTTPPort 0 leaves out the HTTP listener and the redirect. With
+  shared certificates, one ReferenceGrant lets the release namespace's
+  ListenerSets use the shared Secret.
 
 With route.parentRefs only the HTTPRoute is created, attached there.
 */ -}}
@@ -28,6 +32,8 @@ With route.parentRefs only the HTTPRoute is created, attached there.
 {{- if and $listenerSet (ne (urlParse $url).scheme "https") }}{{ fail (printf "%s.route in listenerset mode serves HTTPS and redirects HTTP to it, so publicURL must be https://, got %q" $component $url) }}{{ end -}}
 {{- $labels := include "manifesto.componentLabels" (list $root $component) -}}
 {{- if $listenerSet }}
+{{- include "manifesto.validateTLS" $root }}
+{{- $tls := $r.tls }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: ListenerSet
@@ -47,16 +53,30 @@ spec:
     protocol: HTTPS
     tls:
       mode: Terminate
+      {{- if eq $tls.certificateRefs "perGazette" }}
       certificateRefs:
       - name: {{ $name }}-tls
+      {{- else if eq $tls.certificateRefs "shared" }}
+      {{- $secret := splitList "/" $tls.sharedSecret }}
+      certificateRefs:
+      - name: {{ index $secret 1 }}
+        namespace: {{ index $secret 0 }}
+      {{- end }}
+      {{- with $tls.options }}
+      options:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     allowedRoutes:
       namespaces: {from: Same}
+  {{- if $r.listenerHTTPPort }}
   - name: http
     hostname: {{ $host }}
     port: {{ $r.listenerHTTPPort }}
     protocol: HTTP
     allowedRoutes:
       namespaces: {from: Same}
+  {{- end }}
+{{- if $r.listenerHTTPPort }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -76,6 +96,7 @@ spec:
   - filters:
     - type: RequestRedirect
       requestRedirect: {scheme: https, statusCode: 301}
+{{- end }}
 {{- with $r.clusterIssuer }}
 ---
 apiVersion: cert-manager.io/v1
@@ -134,4 +155,30 @@ spec:
 {{- $url := required "darkroom.publicURL is required with darkroom.route.enabled, e.g. https://media.example.io" .publicURL }}
 {{ include "manifesto.route" (list $ "darkroom" $url .route) }}
 {{- end }}
+{{- end }}
+
+{{- /* The shared TLS Secret's grant for the ListenerSets above. press names
+its grants manifesto-<namespace>.tls, so this name never collides. */ -}}
+{{- $r := .Values.press.routing }}
+{{- $desk := and .Values.desk.enabled .Values.desk.route.enabled (not .Values.desk.route.parentRefs) }}
+{{- $darkroom := and .Values.darkroom.enabled .Values.darkroom.route.enabled (not .Values.darkroom.route.parentRefs) }}
+{{- if and (or $desk $darkroom) (ne $r.mode "gateway") (eq $r.tls.certificateRefs "shared") }}
+{{- $secret := splitList "/" $r.tls.sharedSecret }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: manifesto.{{ .Release.Namespace }}.tls
+  namespace: {{ index $secret 0 }}
+  labels:
+    {{- include "manifesto.labels" . | nindent 4 }}
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: ListenerSet
+    namespace: {{ .Release.Namespace }}
+  to:
+  - group: ""
+    kind: Secret
+    name: {{ index $secret 1 }}
 {{- end }}
