@@ -88,5 +88,9 @@ controller.Routing.Validate).
 {{- if not (has $t.certificateRefs (list "perGazette" "shared" "none")) }}{{ fail (printf "press.routing.tls.certificateRefs must be perGazette, shared or none, got %q" $t.certificateRefs) }}{{ end -}}
 {{- if and (eq $t.certificateRefs "shared") (not (regexMatch "^[^/]+/[^/]+$" $t.sharedSecret)) }}{{ fail "press.routing.tls.sharedSecret is required as <namespace>/<name> with certificateRefs: shared" }}{{ end -}}
 {{- if and (eq $t.certificateRefs "none") (not $t.options) }}{{ fail "press.routing.tls.options must tell the Gateway where to get certificates with certificateRefs: none" }}{{ end -}}
+{{- if gt (len $t.options) 16 }}{{ fail (printf "press.routing.tls.options takes at most 16 entries, got %d" (len $t.options)) }}{{ end -}}
+{{- range $k, $_ := $t.options }}
+{{- if not (regexMatch "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]$" $k) }}{{ fail (printf "press.routing.tls.options key %q is not valid, use e.g. example.io/option" $k) }}{{ end -}}
+{{- end }}
 {{- if and $r.clusterIssuer (ne $t.certificateRefs "perGazette") }}{{ fail "press.routing.clusterIssuer only works with tls.certificateRefs: perGazette" }}{{ end -}}
 {{- end }}

@@ -521,6 +521,8 @@ func TestChartRouteErrors(t *testing.T) {
 			"sharedSecret is required"},
 		{"needs options without certificates", append(slices.Clone(base), "press.routing.tls.certificateRefs=none"),
 			"options must tell the Gateway"},
+		{"checks option keys", append(slices.Clone(base), `press.routing.tls.options.Example\.io/x=y`),
+			"is not valid"},
 		{"keeps the ClusterIssuer to perGazette", append(slices.Clone(base), "press.routing.clusterIssuer=le",
 			"press.routing.tls.certificateRefs=shared", "press.routing.tls.sharedSecret=certs/wildcard"),
 			"clusterIssuer only works"},

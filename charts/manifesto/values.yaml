@@ -51,9 +51,12 @@ press:
       # none: no certificateRefs; the Gateway implementation provides the
       #   certificates, as options tell it.
       certificateRefs: perGazette
-      # shared: the Secret, as <namespace>/<name>.
+      # shared: the Secret, as <namespace>/<name>. Its namespace must exist
+      # before install: the chart puts a ReferenceGrant there when desk.route
+      # or darkroom.route creates a ListenerSet.
       sharedSecret: ""
-      # Copied to each HTTPS listener's tls.options (implementation-specific).
+      # Copied to each HTTPS listener's tls.options (implementation-specific):
+      # at most 16, keys such as example.io/option, values strings.
       options: {}
   extraArgs: []
   resources:

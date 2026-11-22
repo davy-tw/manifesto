@@ -9,6 +9,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -106,6 +107,12 @@ func (t ListenerTLS) mode() TLSCertificates {
 	return t.Certificates
 }
 
+// maxTLSOptions and tlsOptionKey are Gateway API's limits on tls.options
+// (MaxProperties of the map and the pattern of AnnotationKey).
+const maxTLSOptions = 16
+
+var tlsOptionKey = regexp.MustCompile(`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]$`)
+
 // Validate reports a configuration the API server or the Gateway would
 // reject, so press can refuse to start with it.
 func (r Routing) Validate() error {
@@ -124,6 +131,17 @@ func (r Routing) Validate() error {
 		}
 	default:
 		return fmt.Errorf("unknown TLS certificates %q: use perGazette, shared or none", r.TLS.Certificates)
+	}
+	if len(r.TLS.Options) > maxTLSOptions {
+		return fmt.Errorf("at most %d TLS options fit a listener, got %d", maxTLSOptions, len(r.TLS.Options))
+	}
+	for k, v := range r.TLS.Options {
+		if len(k) > 253 || !tlsOptionKey.MatchString(k) {
+			return fmt.Errorf("TLS option key %q is not a valid key, such as example.io/option", k)
+		}
+		if len(v) > 4096 {
+			return fmt.Errorf("TLS option %s is longer than 4096 bytes", k)
+		}
 	}
 	if r.ClusterIssuer != "" && r.TLS.mode() != TLSPerGazette {
 		return fmt.Errorf("a ClusterIssuer only signs perGazette certificates, not %s ones", r.TLS.mode())
@@ -492,10 +510,24 @@ func (r *GazetteReconciler) deleteRouting(ctx context.Context, g *v1.Gazette) er
 
 // deleteObjects deletes objs that exist and press manages. A missing kind
 // (cert-manager or ListenerSet CRDs not installed) is treated as absent.
+//
+// Objects press did not create (no managed-by label of press's) are left
+// alone, so that a Certificate or route the user made under the same name
+// survives a configuration that does not need press's own.
 func (r *GazetteReconciler) deleteObjects(ctx context.Context, objs ...client.Object) error {
 	for _, o := range objs {
-		err := r.Delete(ctx, o)
-		if err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+		err := r.Get(ctx, client.ObjectKeyFromObject(o), o)
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if o.GetLabels()[labelManagedBy] != v1.FieldManagerPress {
+			continue
+		}
+		err = r.Delete(ctx, o, client.Preconditions{UID: new(o.GetUID())})
+		if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
 			return err
 		}
 	}
@@ -525,10 +557,7 @@ func (r *GazetteReconciler) reconcileReferenceGrant(ctx context.Context, namespa
 		Labels:    map[string]string{labelNamespace: namespace},
 	}
 	if !needed {
-		if err := r.Delete(ctx, grant); err != nil && !apierrors.IsNotFound(err) {
-			return err
-		}
-		return nil
+		return r.deleteObjects(ctx, grant)
 	}
 	grant.Spec = gatewayv1.ReferenceGrantSpec{
 		From: []gatewayv1.ReferenceGrantFrom{{

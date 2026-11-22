@@ -221,6 +221,9 @@ func TestRoutingValidate(t *testing.T) {
 		{"issuer with shared", Routing{Gateway: gw, ClusterIssuer: "le",
 			TLS: ListenerTLS{Certificates: TLSShared, SharedSecret: secret}}, true},
 		{"unknown", Routing{Gateway: gw, TLS: ListenerTLS{Certificates: "wildcard"}}, true},
+		{"bad option key", Routing{Gateway: gw, TLS: ListenerTLS{Options: map[string]string{"Example.io/x": "y"}}}, true},
+		{"too many options", Routing{Gateway: gw, TLS: ListenerTLS{Options: manyOptions(17)}}, true},
+		{"as many options as fit", Routing{Gateway: gw, TLS: ListenerTLS{Options: manyOptions(16)}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -265,6 +268,23 @@ func TestRoutingCleanup(t *testing.T) {
 		t.Fatal("the Certificate and redirect were not created")
 	}
 
+	// A Certificate of the user's own, under the name press would use, is
+	// not press's to delete.
+	other := routingGazette()
+	other.Name = "mine"
+	userCert := certificateRef(other)
+	userCert.Object["spec"] = map[string]any{"secretName": "mine-tls"}
+	if err := c.Create(ctx, userCert); err != nil {
+		t.Fatal(err)
+	}
+	r.Routing.ClusterIssuer = ""
+	if _, err := r.reconcileRouting(ctx, other, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !present(certificateRef(other)) {
+		t.Error("press deleted a Certificate it did not create")
+	}
+
 	opts := map[string]string{"example.io/certificates": "managed"}
 	r.Routing = Routing{Gateway: gw, Herald: herald, NoHTTP: true, TLS: ListenerTLS{Certificates: TLSNone, Options: opts}}
 	if _, err := r.reconcileRouting(ctx, g, ""); err != nil {
@@ -301,4 +321,12 @@ func TestRoutingCleanup(t *testing.T) {
 			t.Errorf("with %+v, grants = %s, want %s", step.tls, got, step.want)
 		}
 	}
+}
+
+func manyOptions(n int) map[string]string {
+	m := map[string]string{}
+	for i := range n {
+		m[fmt.Sprintf("example.io/option-%d", i)] = "on"
+	}
+	return m
 }

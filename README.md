@@ -174,7 +174,7 @@ press 會在 Gazette 的 namespace 建立 `manifesto-<gazette>` 的 ListenerSet�
 | `shared` | `sharedSecret` 指定的 Secret | Secret 所在 namespace 的 ReferenceGrant `manifesto-<namespace>.tls`，每個有 Gazette 的 namespace 一個（chart 另建 `manifesto.<release namespace>.tls`） | 一張萬用字元憑證 |
 | `none` | 不寫 | 無 | Gateway 實作自己提供憑證，由 `options` 告訴它怎麼做 |
 
-`options` 可以跟任何一種並用，內容依 Gateway 實作而定。`none` 時 `options` 不能是空的（Gateway API 要求 HTTPS listener 至少有其中之一），`shared` 時 `sharedSecret` 必填，`clusterIssuer` 只能搭 `perGazette`；設定不符時 chart 會報錯，press 也拒絕啟動。改設定後 press 會刪掉不再需要的 Certificate、轉址 HTTPRoute 與 ReferenceGrant。
+`options` 可以跟任何一種並用，內容依 Gateway 實作而定。`none` 時 `options` 不能是空的（Gateway API 要求 HTTPS listener 至少有其中之一），`shared` 時 `sharedSecret` 必填，`clusterIssuer` 只能搭 `perGazette`；設定不符時 chart 會報錯，press 也拒絕啟動。改設定後 press 會刪掉不再需要的 Certificate、轉址 HTTPRoute 與 ReferenceGrant，只刪自己建立的（帶 `app.kubernetes.io/managed-by: manifesto-press` label），同名但由你自己建立的物件不受影響。`options` 最多 16 個，key 格式同 annotation（例如 `example.io/option`）。
 
 ```yaml
 press:

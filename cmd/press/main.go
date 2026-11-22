@@ -163,7 +163,7 @@ func main() {
 	routing.TLS.Certificates = controller.TLSCertificates(tlsCerts)
 	if tlsSecret != "" {
 		ns, name, ok := strings.Cut(tlsSecret, "/")
-		if !ok {
+		if !ok || ns == "" || name == "" || strings.Contains(name, "/") {
 			setupLog.Error(nil, "--listener-tls-secret must be namespace/name", "value", tlsSecret)
 			os.Exit(1)
 		}
