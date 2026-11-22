@@ -354,6 +354,7 @@ status:
 ## 安裝
 
 - Helm chart `charts/manifesto` 與 kustomize `config/default` 建立相同的資源與名稱（`manifesto-*`），一個叢集裝一次
+- chart 可選擇性地替 desk 與 darkroom 的公開 port 建立路由（`desk.route`、`darkroom.route`，hostname 取自各自的 `publicURL`）：掛到 press 使用的 Gateway，物件與 press 替同名 Gazette 建的相同（`gateway` 模式一條 HTTPRoute；`listenerset` 模式加上 ListenerSet、轉址 HTTPRoute 與選用的 Certificate），`test/chart` 以 `controller.RoutingObjects` 比對兩者。預設關閉。Gateway 本身與 ClusterArchive 仍由叢集管理者建立（chart 的 CRD 在 templates 裡，首次安裝時無法同時建立 CR）
 - chart 的 CRD 與 RBAC 不手寫：`make chart` 從 kustomize 的輸出產生 `charts/manifesto/files/`，CI 檢查有沒有過期；`test/chart` 比對兩者的物件、CRD、RBAC 與 Pod 設定
 - CRD 放在 templates（不是 `crds/`），升級時才會更新；CRD 和媒體 PVC 加上 `helm.sh/resource-policy: keep`
 - k3d 的 E2E 用 Helm 安裝（gateway 模式），Kind 的 E2E 用 kustomize
