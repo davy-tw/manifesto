@@ -17,6 +17,9 @@ const path = require('path');
     await page.goto(url);
     await page.getByRole('link', { name: 'Sign in' }).click();
     await page.locator('#who', { hasText: 'Alice' }).waitFor();
+    await page.getByRole('heading', { name: 'Choose a publication' }).waitFor();
+    // First sign-in: no recent namespaces, and no stray "null" either.
+    if ((await page.textContent('#main')).includes('null')) throw new Error('namespace chooser shows "null"');
 
     step('open the publication');
     await page.fill('#ns', 'blog-ui');
@@ -25,6 +28,8 @@ const path = require('path');
 
     step('write a dispatch with a live preview');
     await page.getByRole('link', { name: 'New dispatch' }).click();
+    await page.locator('#f-name').waitFor();
+    if ((await page.textContent('#main')).includes('null')) throw new Error('new dispatch editor shows "null"');
     await page.fill('#f-name', 'hello-ui');
     await page.fill('#f-title', 'Hello from the UI');
     await page.fill('#f-body', '# Written in desk\n\nThe preview uses the real theme.');
