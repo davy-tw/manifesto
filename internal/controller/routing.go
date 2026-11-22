@@ -322,7 +322,13 @@ func applyObject(ctx context.Context, c client.Client, scheme *runtime.Scheme, o
 	if _, ok := obj.(*unstructured.Unstructured); ok {
 		return nil
 	}
-	return c.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+	// The cache may not have seen an object the apply just created. Such an
+	// object has no status yet, so obj (as applied) already says all there is;
+	// the watch on it brings the next reconcile once the Gateway reports.
+	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 // listenerSetObjects are the objects only ModeListenerSet creates for g.
