@@ -28,10 +28,12 @@ function h(tag, attrs = {}, ...children) {
 const main = () => document.getElementById('main');
 let current = new AbortController(); // aborted when the view changes
 
+// show replaces the view. Like h, it skips null, undefined and false, which
+// replaceChildren would otherwise print as text ("null").
 function show(...nodes) {
   current.abort();
   current = new AbortController();
-  main().replaceChildren(...nodes);
+  main().replaceChildren(...nodes.flat().filter((n) => n !== null && n !== undefined && n !== false));
   return current.signal;
 }
 
