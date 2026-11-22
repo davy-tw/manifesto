@@ -338,6 +338,18 @@ func TestChartHerald(t *testing.T) {
 		}
 	})
 
+	t.Run("autoscaling needs a metric and a sane range", func(t *testing.T) {
+		for _, set := range [][]string{
+			{"herald.autoscaling.targetCPUUtilizationPercentage=null"},
+			{"herald.autoscaling.minReplicas=5", "herald.autoscaling.maxReplicas=3"},
+		} {
+			_, err := helmTemplate(t, append([]string{"desk.publicURL=https://d", "herald.autoscaling.enabled=true"}, set...)...)
+			if err == nil || !strings.Contains(err.Error(), "herald.autoscaling") {
+				t.Errorf("%v: err = %v", set, err)
+			}
+		}
+	})
+
 	t.Run("herald defaults", func(t *testing.T) {
 		objs, err := helmTemplate(t, "desk.publicURL=https://d", "herald.podDisruptionBudget.enabled=false")
 		if err != nil {

@@ -235,6 +235,24 @@ func TestCacheControl(t *testing.T) {
 	if got := get(t, snap, host, "/", nil).Header.Get("Cache-Control"); got != DefaultCacheControl {
 		t.Errorf("default Cache-Control = %q", got)
 	}
+
+	// A 304 repeats the caching headers.
+	etag := do(host, "/posts/hello").Header.Get("ETag")
+	req := httptest.NewRequest(http.MethodGet, "/posts/hello", nil)
+	req.Host, req.Header["If-None-Match"] = host, []string{etag}
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if r := rec.Result(); r.StatusCode != http.StatusNotModified || r.Header.Get("Cache-Control") != cdn || r.Header.Get("ETag") != etag {
+		t.Errorf("304 = %d, Cache-Control %q, ETag %q", r.StatusCode, r.Header.Get("Cache-Control"), r.Header.Get("ETag"))
+	}
+
+	// A page that never rendered (no theme) must not stick in a cache.
+	srv.Store(newBuilder(nil).Build(Inputs{Gazettes: []v1.Gazette{gazette()}, Dispatches: []v1.Dispatch{
+		dispatch("hello", v1.PhasePublished, t0),
+	}}, nil))
+	if r := do(host, "/posts/hello"); r.StatusCode != http.StatusServiceUnavailable || r.Header.Get("Cache-Control") != "no-store" {
+		t.Errorf("never rendered = %d, Cache-Control %q; want 503, no-store", r.StatusCode, r.Header.Get("Cache-Control"))
+	}
 }
 
 // Replicas build their snapshots independently; a CDN revalidating against

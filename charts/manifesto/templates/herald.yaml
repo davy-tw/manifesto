@@ -65,6 +65,13 @@ spec:
     app.kubernetes.io/name: manifesto
     app.kubernetes.io/component: herald
 {{- if $h.autoscaling.enabled }}
+{{- $as := $h.autoscaling }}
+{{- if not (or $as.targetCPUUtilizationPercentage $as.targetMemoryUtilizationPercentage) }}
+{{- fail "herald.autoscaling needs targetCPUUtilizationPercentage or targetMemoryUtilizationPercentage" }}
+{{- end }}
+{{- if gt (int $as.minReplicas) (int $as.maxReplicas) }}
+{{- fail "herald.autoscaling.minReplicas must not exceed maxReplicas" }}
+{{- end }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

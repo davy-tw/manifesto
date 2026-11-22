@@ -85,11 +85,17 @@ herald:
   # costs herald almost nothing). Behind a CDN, let it keep pages for a
   # while, e.g. "public, max-age=0, s-maxage=300, stale-while-revalidate=60,
   # stale-if-error=86400": changes then reach visitors up to s-maxage later.
+  # That includes retractions: a Retracted or Draft post stays on the CDN for
+  # up to s-maxage + stale-while-revalidate, and stale-if-error longer if
+  # herald fails meanwhile. Purge the CDN to take a post down at once.
   cacheControl: no-cache
   # autoscaling replaces replicas with a HorizontalPodAutoscaler (needs
   # metrics-server, which k3s ships). Utilization is relative to
   # resources.requests: raise requests.cpu to what one replica really uses
-  # before turning it on.
+  # before turning it on. Turning it on in an existing release removes
+  # replicas from the Deployment, which falls to 1 replica until the
+  # autoscaler scales it back: first "kubectl scale deployment
+  # manifesto-herald --replicas=<minReplicas>" if that gap matters.
   autoscaling:
     enabled: false
     minReplicas: 2

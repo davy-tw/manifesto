@@ -263,8 +263,8 @@ herald 用 informer 監看 Gazette、Dispatch、Scribe、Section、Stamp、Types
 - Markdown 用 goldmark 轉換，再用 bluemonday 清理 HTML，避免 XSS
 - **記憶體內預先渲染**：herald 收到 informer 事件時，就在背景重建快照，算好 HTML 放進快取。快取 key 包含 Dispatch、Gazette、Typeset，以及同 namespace 所有 Section、Stamp、Scribe 的 resourceVersion，任何一個改變就重算
 - ETag 由頁面內容雜湊而成（不是快取 key），所以每個副本、以及 rolling update 時新舊版本對同一份內容都給出同一個 ETag；`If-None-Match` 相符回 304
-- `Cache-Control` 由 `--cache-control`（chart 的 `herald.cacheControl`）設定，套用在頁面、404 與 410；預設 `no-cache`，瀏覽器與 CDN 每次都用 ETag 重新驗證。放在 CDN 後面時可以改成例如 `public, max-age=0, s-maxage=300, stale-while-revalidate=60, stale-if-error=86400`，變更最多延遲 `s-maxage` 才到訪客。503、未知網域與健康檢查一律 `no-store`
-- 擴展：herald 不保存狀態，每個副本各自 watch 並在記憶體保存所有網站的頁面。chart 預設 2 副本與 `maxUnavailable: 1` 的 PodDisruptionBudget；`herald.autoscaling` 改用 HorizontalPodAutoscaler（CPU 與選用的記憶體使用率，相對於 `resources.requests`，開啟前要把 requests 調成實際用量）
+- `Cache-Control` 由 `--cache-control`（chart 的 `herald.cacheControl`）設定，套用在頁面、404 與 410；預設 `no-cache`，瀏覽器與 CDN 每次都用 ETag 重新驗證。放在 CDN 後面時可以改成例如 `public, max-age=0, s-maxage=300, stale-while-revalidate=60, stale-if-error=86400`，變更最多延遲 `s-maxage` 才到訪客；撤回（Retracted、改回 Draft）也一樣，最多還會出現 `s-maxage + stale-while-revalidate`，herald 出錯時 `stale-if-error` 會再延長，緊急撤回要手動 purge CDN。503、未知網域與健康檢查一律 `no-store`
+- 擴展：herald 不保存狀態，每個副本各自 watch 並在記憶體保存所有網站的頁面。chart 預設 2 副本與 `maxUnavailable: 1` 的 PodDisruptionBudget；`herald.autoscaling` 改用 HorizontalPodAutoscaler（CPU 與選用的記憶體使用率，相對於 `resources.requests`，開啟前要把 requests 調成實際用量；在既有 release 開啟時 Helm 會移除 `replicas`，Deployment 會先掉到 1 副本，可以先 `kubectl scale` 到 `minReplicas`）
 - 主題解析失敗時沿用上一個可用版本；從來沒有成功過，HTML 頁面回 503（Wire 與 sitemap 照常）
 - **渲染結果不存進 `status`**：否則物件大小會翻倍，換主題時也得重寫所有文章；herald 保持唯讀，`status` 只放 press 寫入的 `Rendered` condition
 
