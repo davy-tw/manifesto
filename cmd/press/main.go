@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -100,7 +101,41 @@ func main() {
 		"In gateway mode, the Gateway listener HTTPRoutes attach to (sectionName). Empty attaches to all listeners.")
 	var httpsPort, httpPort int
 	flag.IntVar(&httpsPort, "listener-https-port", 443, "In listenerset mode, the port of each HTTPS listener.")
-	flag.IntVar(&httpPort, "listener-http-port", 80, "In listenerset mode, the port of each HTTP listener.")
+	flag.IntVar(&httpPort, "listener-http-port", 80,
+		"In listenerset mode, the port of each HTTP listener, which redirects to HTTPS. 0 leaves the HTTP listener out.")
+	var tlsCerts, tlsSecret string
+	flag.StringVar(&tlsCerts, "listener-tls-certificates", string(controller.TLSPerGazette),
+		"In listenerset mode, the certificates of each HTTPS listener: \"perGazette\" (Secret manifesto-<gazette>-tls, "+
+			"signed by --cluster-issuer when set), \"shared\" (--listener-tls-secret) or \"none\" (the Gateway "+
+			"implementation provides them, as --listener-tls-option tells it).")
+	flag.StringVar(&tlsSecret, "listener-tls-secret", "",
+		"With --listener-tls-certificates=shared, the Secret every HTTPS listener uses, as namespace/name.")
+	flag.Func("listener-annotation",
+		"In listenerset mode, a key=value added to the annotations of every ListenerSet. Repeatable.",
+		func(v string) error {
+			k, val, ok := strings.Cut(v, "=")
+			if !ok || k == "" {
+				return fmt.Errorf("want key=value, got %q", v)
+			}
+			if routing.ListenerSetAnnotations == nil {
+				routing.ListenerSetAnnotations = map[string]string{}
+			}
+			routing.ListenerSetAnnotations[k] = val
+			return nil
+		})
+	flag.Func("listener-tls-option",
+		"In listenerset mode, a key=value added to each HTTPS listener's tls.options. Repeatable.",
+		func(v string) error {
+			k, val, ok := strings.Cut(v, "=")
+			if !ok || k == "" {
+				return fmt.Errorf("want key=value, got %q", v)
+			}
+			if routing.TLS.Options == nil {
+				routing.TLS.Options = map[string]string{}
+			}
+			routing.TLS.Options[k] = val
+			return nil
+		})
 	flag.StringVar(&heraldService, "herald-service", "manifesto-system/manifesto-herald",
 		"herald's Service, as namespace/name, that every HTTPRoute sends traffic to.")
 	var heraldPort int
@@ -137,6 +172,16 @@ func main() {
 	routing.HeraldPort = int32(heraldPort) // #nosec G115 -- a port number
 	routing.HTTPSPort = int32(httpsPort)   // #nosec G115 -- a port number
 	routing.HTTPPort = int32(httpPort)     // #nosec G115 -- a port number
+	routing.NoHTTP = httpPort == 0
+	routing.TLS.Certificates = controller.TLSCertificates(tlsCerts)
+	if tlsSecret != "" {
+		ns, name, ok := strings.Cut(tlsSecret, "/")
+		if !ok || ns == "" || name == "" || strings.Contains(name, "/") {
+			setupLog.Error(nil, "--listener-tls-secret must be namespace/name", "value", tlsSecret)
+			os.Exit(1)
+		}
+		routing.TLS.SharedSecret = types.NamespacedName{Namespace: ns, Name: name}
+	}
 	routing.Mode = controller.RoutingMode(mode)
 	if routing.Mode != controller.ModeListenerSet && routing.Mode != controller.ModeGateway {
 		setupLog.Error(nil, "--routing-mode must be listenerset or gateway", "value", mode)
@@ -144,6 +189,10 @@ func main() {
 	}
 	if routing.Enabled() && routing.Gateway.Namespace == "" {
 		setupLog.Error(nil, "--gateway-namespace is required with --gateway-name")
+		os.Exit(1)
+	}
+	if err := routing.Validate(); err != nil {
+		setupLog.Error(err, "Invalid listener flags")
 		os.Exit(1)
 	}
 

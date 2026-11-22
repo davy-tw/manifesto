@@ -53,7 +53,7 @@ helm install manifesto oci://ghcr.io/davy-tw/charts/manifesto --version <X.Y.Z> 
 | 值 | 說明 |
 |---|---|
 | `imageRegistry`、`<元件>.image.repository/tag` | image 位置，預設 `ghcr.io/davy-tw/manifesto-<元件>`；tag 預設是 chart 的 appVersion |
-| `press.routing.*` | Gateway 路由（`gatewayName`、`gatewayNamespace`、`mode`、`gatewaySection`、`clusterIssuer`） |
+| `press.routing.*` | Gateway 路由（`gatewayName`、`gatewayNamespace`、`mode`、`gatewaySection`、`listenerHTTPSPort`、`listenerHTTPPort`、`clusterIssuer`、`listenerSetAnnotations`、`tls`）；`tls` 見下方「listener 的 TLS」 |
 | `press.editions`、`press.editionBytes` | 每篇保留的 Edition 數與內容總量上限（預設 20 版、2Mi），避免修訂版本塞滿 etcd |
 | `darkroom.enabled`、`darkroom.persistence.*` | 媒體（pvc Archive）與它的 PVC；全部用 S3 時可以關掉 |
 | `desk.publicURL`、`desk.oidc.*`、`desk.tokenSignIn` | desk 的網址與登入方式 |
@@ -149,8 +149,12 @@ press 第一次啟動會在 `manifesto-system` 建立簽章用的 Secret `manife
 | `--routing-mode` | `listenerset`（預設）：每個 Gazette 一個 ListenerSet 與憑證；`gateway`：HTTPRoute 直接掛到 Gateway 的 listener，TLS 由 Gateway 負責 |
 | `--gateway-name`、`--gateway-namespace` | 共用的 Gateway |
 | `--gateway-section` | `gateway` 模式下要掛的 listener 名稱（選用） |
-| `--listener-https-port`、`--listener-http-port` | `listenerset` 模式下 listener 的 port，預設 443 與 80 |
-| `--cluster-issuer` | 選用。cert-manager 的 ClusterIssuer；設定後 press 替每個網域建立 `Certificate` |
+| `--listener-https-port`、`--listener-http-port` | `listenerset` 模式下 listener 的 port，預設 443 與 80；HTTP port 設 0 就不建 HTTP listener 與轉址 |
+| `--listener-tls-certificates` | `listenerset` 模式下 HTTPS listener 的憑證：`perGazette`（預設）、`shared` 或 `none`，見下方 |
+| `--listener-tls-secret` | `shared` 時所有 listener 共用的 Secret，`<namespace>/<name>` |
+| `--listener-tls-option` | `key=value`，原樣寫進每個 HTTPS listener 的 `tls.options`，可重複 |
+| `--listener-annotation` | `key=value`，原樣寫進每個 ListenerSet 的 `metadata.annotations`，可重複；給會讀 ListenerSet annotation 的 controller 用。`cert-manager.io/` 開頭的 key 不能和 `--cluster-issuer` 並用 |
+| `--cluster-issuer` | 選用。cert-manager 的 ClusterIssuer；設定後 press 替每個網域建立 `Certificate`（只能搭配 `perGazette`） |
 | `--herald-service`、`--herald-port` | herald 的 Service，預設 `manifesto-system/manifesto-herald:80` |
 
 **k3s（內建 Traefik）請用 `gateway` 模式，步驟見 [`docs/k3s.md`](docs/k3s.md)。**
@@ -162,6 +166,26 @@ press 第一次啟動會在 `manifesto-system` 建立簽章用的 Secret `manife
 - 用 cert-manager 時建議 DNS-01 的 ClusterIssuer（HTTP-01 要額外設定才能經過每個 ListenerSet）
 
 press 會在 Gazette 的 namespace 建立 `manifesto-<gazette>` 的 ListenerSet、HTTPRoute（以及 HTTP 轉 HTTPS 的 `-redirect`）和 Certificate，並在 herald 的 namespace 建立 ReferenceGrant。`kubectl get blog` 的 `Routed` condition 會顯示 Gateway 是否已經接手。
+
+**listener 的 TLS**（chart 的 `press.routing.tls`，chart 替 desk 與媒體建的 ListenerSet 也用同一組設定）：
+
+| `certificateRefs` | HTTPS listener 的 `certificateRefs` | 額外建立的物件 | 適用情境 |
+|---|---|---|---|
+| `perGazette`（預設） | Gazette namespace 的 `manifesto-<gazette>-tls` | 設了 `clusterIssuer` 才建 Certificate；否則 Secret 自己準備 | 每個網域一張憑證 |
+| `shared` | `sharedSecret` 指定的 Secret | Secret 所在 namespace 的 ReferenceGrant `manifesto-<namespace>.tls`，每個有 Gazette 的 namespace 一個（chart 另建 `manifesto.<release namespace>.tls`） | 一張萬用字元憑證 |
+| `none` | 不寫 | 無 | Gateway 實作自己提供憑證，由 `options` 告訴它怎麼做 |
+
+`options` 可以跟任何一種並用，內容依 Gateway 實作而定。`none` 時 `options` 不能是空的（Gateway API 要求 HTTPS listener 至少有其中之一），`shared` 時 `sharedSecret` 必填，`clusterIssuer` 只能搭 `perGazette`；設定不符時 chart 會報錯，press 也拒絕啟動。改設定後 press 會刪掉不再需要的 Certificate、轉址 HTTPRoute 與 ReferenceGrant，只刪自己建立的（帶 `app.kubernetes.io/managed-by: manifesto-press` label），同名但由你自己建立的物件不受影響。`options` 最多 16 個，key 格式同 annotation（例如 `example.io/option`）。
+
+```yaml
+press:
+  routing:
+    listenerHTTPPort: 0          # 只提供 HTTPS
+    tls:
+      certificateRefs: none
+      options:
+        example.io/certificate-source: managed   # 依 Gateway 實作填寫
+```
 
 ## mfctl
 

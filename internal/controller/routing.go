@@ -9,6 +9,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
+	"regexp"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -59,10 +62,113 @@ type Routing struct {
 	// Herald is herald's Service, which every HTTPRoute sends traffic to.
 	Herald     types.NamespacedName
 	HeraldPort int32
+	// NoHTTP leaves out the ListenerSet's HTTP listener and its redirect
+	// HTTPRoute, for Gateways that serve HTTPS only.
+	NoHTTP bool
+	// ListenerSetAnnotations are written as they are into the metadata of
+	// every ListenerSet, for controllers that read them (for example a
+	// certificate controller). Removing one removes it from the ListenerSets.
+	ListenerSetAnnotations map[string]string
+	// TLS configures the ListenerSet's HTTPS listener.
+	TLS ListenerTLS
 	// ClusterIssuer is the cert-manager ClusterIssuer that signs each
-	// domain's certificate. When empty, no Certificate is created and the
-	// TLS Secret must be provided some other way.
+	// domain's certificate, with TLSPerGazette only. When empty, no
+	// Certificate is created and the TLS Secret must be provided some other
+	// way.
 	ClusterIssuer string
+}
+
+// TLSCertificates selects the certificateRefs of a ListenerSet's HTTPS
+// listener.
+type TLSCertificates string
+
+const (
+	// TLSPerGazette refers to the Secret manifesto-<gazette>-tls in the
+	// Gazette's namespace, signed by ClusterIssuer when set.
+	TLSPerGazette TLSCertificates = "perGazette"
+	// TLSShared refers every listener to ListenerTLS.SharedSecret, such as a
+	// wildcard certificate; press lets each namespace with Gazettes refer to
+	// it with a ReferenceGrant in the Secret's namespace.
+	TLSShared TLSCertificates = "shared"
+	// TLSNone sets no certificateRefs: the Gateway implementation provides
+	// the certificate, as configured by ListenerTLS.Options.
+	TLSNone TLSCertificates = "none"
+)
+
+// ListenerTLS configures the TLS of a ListenerSet's HTTPS listener. The zero
+// value is TLSPerGazette without options.
+type ListenerTLS struct {
+	Certificates TLSCertificates
+	// SharedSecret is the Secret every listener refers to, with TLSShared.
+	SharedSecret types.NamespacedName
+	// Options are copied to each listener's tls.options, for settings
+	// specific to the Gateway implementation.
+	Options map[string]string
+}
+
+func (t ListenerTLS) mode() TLSCertificates {
+	if t.Certificates == "" {
+		return TLSPerGazette
+	}
+	return t.Certificates
+}
+
+// maxTLSOptions and tlsOptionKey are Gateway API's limits on tls.options
+// (MaxProperties of the map and the pattern of AnnotationKey).
+const maxTLSOptions = 16
+
+var tlsOptionKey = regexp.MustCompile(`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]$`)
+
+// Validate reports a configuration the API server or the Gateway would
+// reject, so press can refuse to start with it.
+func (r Routing) Validate() error {
+	if !r.Enabled() || !r.usesListenerSets() {
+		return nil
+	}
+	switch r.TLS.mode() {
+	case TLSPerGazette:
+	case TLSShared:
+		if r.TLS.SharedSecret.Name == "" || r.TLS.SharedSecret.Namespace == "" {
+			return fmt.Errorf("shared TLS certificates need a Secret as <namespace>/<name>")
+		}
+	case TLSNone:
+		if len(r.TLS.Options) == 0 {
+			return fmt.Errorf("TLS without certificates needs options that tell the Gateway where to get them")
+		}
+	default:
+		return fmt.Errorf("unknown TLS certificates %q: use perGazette, shared or none", r.TLS.Certificates)
+	}
+	if len(r.TLS.Options) > maxTLSOptions {
+		return fmt.Errorf("at most %d TLS options fit a listener, got %d", maxTLSOptions, len(r.TLS.Options))
+	}
+	for k, v := range r.TLS.Options {
+		if len(k) > 253 || !tlsOptionKey.MatchString(k) {
+			return fmt.Errorf("TLS option key %q is not a valid key, such as example.io/option", k)
+		}
+		if len(v) > 4096 {
+			return fmt.Errorf("TLS option %s is longer than 4096 bytes", k)
+		}
+	}
+	for k := range r.ListenerSetAnnotations {
+		if errs := validation.IsQualifiedName(strings.ToLower(k)); len(errs) > 0 {
+			return fmt.Errorf("ListenerSet annotation key %q: %s", k, strings.Join(errs, "; "))
+		}
+		if r.ClusterIssuer != "" && strings.HasPrefix(k, "cert-manager.io/") {
+			// cert-manager would issue its own Certificate for the Secret
+			// press's Certificate already fills.
+			return fmt.Errorf("ListenerSet annotation %s conflicts with the ClusterIssuer: "+
+				"use one of them to get certificates", k)
+		}
+	}
+	if r.ClusterIssuer != "" && r.TLS.mode() != TLSPerGazette {
+		return fmt.Errorf("a ClusterIssuer only signs perGazette certificates, not %s ones", r.TLS.mode())
+	}
+	return nil
+}
+
+// certificates reports whether press creates a Certificate per Gazette.
+func (r Routing) certificates() bool {
+	return r.ClusterIssuer != "" && r.TLS.mode() == TLSPerGazette
 }
 
 // Enabled reports whether press manages routing.
@@ -87,12 +193,20 @@ func redirectName(g string) string        { return "manifesto-" + g + "-redirect
 func tlsSecretName(g string) string       { return "manifesto-" + g + "-tls" }
 func referenceGrantName(ns string) string { return "manifesto-" + ns }
 
+// tlsGrantName names the ReferenceGrant, in the shared Secret's namespace,
+// that lets ns's ListenerSets refer to the Secret. Namespace names have no
+// dots, so it never collides with referenceGrantName.
+func tlsGrantName(ns string) string { return "manifesto-" + ns + ".tls" }
+
 const (
 	listenerHTTPS = "https"
 	listenerHTTP  = "http"
 
 	// labelNamespace marks a ReferenceGrant with the namespace it admits.
 	labelNamespace = v1.GroupName + "/namespace"
+	// labelGrant tells the ReferenceGrants for the shared TLS Secret
+	// ("tls") from those for herald.
+	labelGrant     = v1.GroupName + "/grant"
 	labelManagedBy = "app.kubernetes.io/managed-by"
 )
 
@@ -130,13 +244,26 @@ func (r *GazetteReconciler) reconcileRouting(ctx context.Context, g *v1.Gazette,
 		return routedCondition(cond, nil, route, "Gateway", r.Routing.Gateway.Name), nil
 	}
 
-	if r.Routing.ClusterIssuer != "" {
-		if err := r.apply(ctx, g, r.certificate(g)); err != nil {
-			return cond, err
-		}
+	// Remove what an earlier configuration may have created.
+	var stale []client.Object
+	if !r.Routing.certificates() {
+		stale = append(stale, certificateRef(g))
 	}
-	ls, redirect := r.listenerSet(g), r.redirectRoute(g)
-	for _, obj := range []client.Object{ls, route, redirect} {
+	if r.Routing.NoHTTP {
+		stale = append(stale, &gatewayv1.HTTPRoute{Namespace: g.Namespace, Name: redirectName(g.Name)})
+	}
+	if err := r.deleteObjects(ctx, stale...); err != nil {
+		return cond, err
+	}
+	ls := r.listenerSet(g)
+	objs := []client.Object{ls, route}
+	if r.Routing.certificates() {
+		objs = append([]client.Object{r.certificate(g)}, objs...)
+	}
+	if !r.Routing.NoHTTP {
+		objs = append(objs, r.redirectRoute(g))
+	}
+	for _, obj := range objs {
 		if err := r.apply(ctx, g, obj); err != nil {
 			return cond, err
 		}
@@ -151,8 +278,11 @@ func RoutingObjects(rt Routing, g *v1.Gazette) []client.Object {
 	r := &GazetteReconciler{Routing: rt}
 	objs := []client.Object{r.httpRoute(g)}
 	if rt.usesListenerSets() {
-		objs = append(objs, r.listenerSet(g), r.redirectRoute(g))
-		if rt.ClusterIssuer != "" {
+		objs = append(objs, r.listenerSet(g))
+		if !rt.NoHTTP {
+			objs = append(objs, r.redirectRoute(g))
+		}
+		if rt.certificates() {
 			objs = append(objs, r.certificate(g))
 		}
 	}
@@ -203,26 +333,51 @@ func (r *GazetteReconciler) listenerSet(g *v1.Gazette) *gatewayv1.ListenerSet {
 	host := gatewayv1.Hostname(g.Spec.Domain)
 	httpsPort, httpPort := r.Routing.ports()
 	same := &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{From: new(gatewayv1.NamespacesFromSame)}}
+	listeners := []gatewayv1.ListenerEntry{{
+		Name: listenerHTTPS, Hostname: &host, Port: httpsPort, Protocol: gatewayv1.HTTPSProtocolType,
+		TLS: r.listenerTLS(g), AllowedRoutes: same,
+	}}
+	if !r.Routing.NoHTTP {
+		listeners = append(listeners, gatewayv1.ListenerEntry{
+			Name: listenerHTTP, Hostname: &host, Port: httpPort, Protocol: gatewayv1.HTTPProtocolType, AllowedRoutes: same,
+		})
+	}
+	var annotations map[string]string
+	if len(r.Routing.ListenerSetAnnotations) > 0 {
+		annotations = maps.Clone(r.Routing.ListenerSetAnnotations)
+	}
 	return &gatewayv1.ListenerSet{
-		Namespace: g.Namespace, Name: routingName(g.Name),
+		Namespace: g.Namespace, Name: routingName(g.Name), Annotations: annotations,
 		Spec: gatewayv1.ListenerSetSpec{
 			ParentRef: gatewayv1.ParentGatewayReference{
 				Name:      gatewayv1.ObjectName(r.Routing.Gateway.Name),
 				Namespace: new(gatewayv1.Namespace(r.Routing.Gateway.Namespace)),
 			},
-			Listeners: []gatewayv1.ListenerEntry{
-				{
-					Name: listenerHTTPS, Hostname: &host, Port: httpsPort, Protocol: gatewayv1.HTTPSProtocolType,
-					TLS: &gatewayv1.ListenerTLSConfig{
-						Mode:            new(gatewayv1.TLSModeTerminate),
-						CertificateRefs: []gatewayv1.SecretObjectReference{{Name: gatewayv1.ObjectName(tlsSecretName(g.Name))}},
-					},
-					AllowedRoutes: same,
-				},
-				{Name: listenerHTTP, Hostname: &host, Port: httpPort, Protocol: gatewayv1.HTTPProtocolType, AllowedRoutes: same},
-			},
+			Listeners: listeners,
 		},
 	}
+}
+
+// listenerTLS is the TLS of g's HTTPS listener, as Routing.TLS asks.
+func (r *GazetteReconciler) listenerTLS(g *v1.Gazette) *gatewayv1.ListenerTLSConfig {
+	t := r.Routing.TLS
+	tls := &gatewayv1.ListenerTLSConfig{Mode: new(gatewayv1.TLSModeTerminate)}
+	switch t.mode() {
+	case TLSPerGazette:
+		tls.CertificateRefs = []gatewayv1.SecretObjectReference{{Name: gatewayv1.ObjectName(tlsSecretName(g.Name))}}
+	case TLSShared:
+		tls.CertificateRefs = []gatewayv1.SecretObjectReference{{
+			Name:      gatewayv1.ObjectName(t.SharedSecret.Name),
+			Namespace: new(gatewayv1.Namespace(t.SharedSecret.Namespace)),
+		}}
+	}
+	if len(t.Options) > 0 {
+		tls.Options = map[gatewayv1.AnnotationKey]gatewayv1.AnnotationValue{}
+		for k, v := range t.Options {
+			tls.Options[gatewayv1.AnnotationKey(k)] = gatewayv1.AnnotationValue(v)
+		}
+	}
+	return tls
 }
 
 func listenerParent(g *v1.Gazette, section string) gatewayv1.ParentReference {
@@ -350,16 +505,21 @@ func applyObject(ctx context.Context, c client.Client, scheme *runtime.Scheme, o
 	return nil
 }
 
-// listenerSetObjects are the objects only ModeListenerSet creates for g.
-func (r *GazetteReconciler) listenerSetObjects(g *v1.Gazette) []client.Object {
+// certificateRef identifies g's Certificate, for deleting it.
+func certificateRef(g *v1.Gazette) *unstructured.Unstructured {
 	cert := &unstructured.Unstructured{}
 	cert.SetGroupVersionKind(certificateGVK)
 	cert.SetNamespace(g.Namespace)
 	cert.SetName(routingName(g.Name))
+	return cert
+}
+
+// listenerSetObjects are the objects only ModeListenerSet creates for g.
+func (r *GazetteReconciler) listenerSetObjects(g *v1.Gazette) []client.Object {
 	return []client.Object{
 		&gatewayv1.HTTPRoute{Namespace: g.Namespace, Name: redirectName(g.Name)},
 		&gatewayv1.ListenerSet{Namespace: g.Namespace, Name: routingName(g.Name)},
-		cert,
+		certificateRef(g),
 	}
 }
 
@@ -371,10 +531,24 @@ func (r *GazetteReconciler) deleteRouting(ctx context.Context, g *v1.Gazette) er
 
 // deleteObjects deletes objs that exist and press manages. A missing kind
 // (cert-manager or ListenerSet CRDs not installed) is treated as absent.
+//
+// Objects press did not create (no managed-by label of press's) are left
+// alone, so that a Certificate or route the user made under the same name
+// survives a configuration that does not need press's own.
 func (r *GazetteReconciler) deleteObjects(ctx context.Context, objs ...client.Object) error {
 	for _, o := range objs {
-		err := r.Delete(ctx, o)
-		if err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+		err := r.Get(ctx, client.ObjectKeyFromObject(o), o)
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if o.GetLabels()[labelManagedBy] != v1.FieldManagerPress {
+			continue
+		}
+		err = r.Delete(ctx, o, client.Preconditions{UID: new(o.GetUID())})
+		if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
 			return err
 		}
 	}
@@ -395,16 +569,16 @@ func (r *GazetteReconciler) reconcileReferenceGrant(ctx context.Context, namespa
 			break
 		}
 	}
+	if err := r.reconcileTLSGrant(ctx, namespace, needed); err != nil {
+		return err
+	}
 	grant := &gatewayv1.ReferenceGrant{
 		Namespace: r.Routing.Herald.Namespace,
 		Name:      referenceGrantName(namespace),
 		Labels:    map[string]string{labelNamespace: namespace},
 	}
 	if !needed {
-		if err := r.Delete(ctx, grant); err != nil && !apierrors.IsNotFound(err) {
-			return err
-		}
-		return nil
+		return r.deleteObjects(ctx, grant)
 	}
 	grant.Spec = gatewayv1.ReferenceGrantSpec{
 		From: []gatewayv1.ReferenceGrantFrom{{
@@ -415,4 +589,49 @@ func (r *GazetteReconciler) reconcileReferenceGrant(ctx context.Context, namespa
 		}},
 	}
 	return r.apply(ctx, nil, grant)
+}
+
+// reconcileTLSGrant lets the ListenerSets of namespace refer to the shared
+// TLS Secret while the namespace has Gazettes and TLSShared is in use, and
+// removes the grants that are no longer needed: after the namespace's last
+// Gazette, a change of mode, or a Secret moving to another namespace.
+func (r *GazetteReconciler) reconcileTLSGrant(ctx context.Context, namespace string, needed bool) error {
+	t := r.Routing.TLS
+	needed = needed && r.Routing.usesListenerSets() && t.mode() == TLSShared
+	var grants gatewayv1.ReferenceGrantList
+	if err := r.List(ctx, &grants, client.MatchingLabels{
+		labelNamespace: namespace, labelGrant: "tls", labelManagedBy: v1.FieldManagerPress,
+	}); err != nil {
+		return err
+	}
+	for i := range grants.Items {
+		gr := &grants.Items[i]
+		if needed && gr.Namespace == t.SharedSecret.Namespace && gr.Name == tlsGrantName(namespace) {
+			continue
+		}
+		if err := r.Delete(ctx, gr); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	if !needed {
+		return nil
+	}
+	return r.apply(ctx, nil, tlsGrant(t.SharedSecret, namespace))
+}
+
+// tlsGrant lets the ListenerSets of namespace refer to secret.
+func tlsGrant(secret types.NamespacedName, namespace string) *gatewayv1.ReferenceGrant {
+	return &gatewayv1.ReferenceGrant{
+		Namespace: secret.Namespace,
+		Name:      tlsGrantName(namespace),
+		Labels:    map[string]string{labelNamespace: namespace, labelGrant: "tls"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{
+				Group: gatewayv1.GroupName, Kind: "ListenerSet", Namespace: gatewayv1.Namespace(namespace),
+			}},
+			To: []gatewayv1.ReferenceGrantTo{{
+				Group: "", Kind: "Secret", Name: new(gatewayv1.ObjectName(secret.Name)),
+			}},
+		},
+	}
 }

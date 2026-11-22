@@ -8,10 +8,12 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -150,5 +152,203 @@ func TestApplyBeforeCacheSync(t *testing.T) {
 	r.Client = failing
 	if err := r.apply(t.Context(), routingGazette(), r.httpRoute(routingGazette())); !apierrors.IsServiceUnavailable(err) {
 		t.Errorf("apply = %v, want the read error", err)
+	}
+}
+
+func TestListenerTLS(t *testing.T) {
+	wildcard := types.NamespacedName{Namespace: "infra", Name: "wildcard-tls"}
+	opts := map[string]string{"example.io/certificates": "managed"}
+	tests := []struct {
+		name     string
+		tls      ListenerTLS
+		wantRefs string // namespace/name of the only certificateRef, empty for none
+		wantOpts int
+	}{
+		{"default is per Gazette", ListenerTLS{}, "/manifesto-notes-tls", 0},
+		{"per Gazette with options", ListenerTLS{Certificates: TLSPerGazette, Options: opts}, "/manifesto-notes-tls", 1},
+		{"shared", ListenerTLS{Certificates: TLSShared, SharedSecret: wildcard}, "infra/wildcard-tls", 0},
+		{"none", ListenerTLS{Certificates: TLSNone, Options: opts}, "", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tls := (&GazetteReconciler{Routing: Routing{TLS: tt.tls}}).listenerSet(routingGazette()).Spec.Listeners[0].TLS
+			var refs string
+			for _, r := range tls.CertificateRefs {
+				if r.Namespace != nil {
+					refs += string(*r.Namespace)
+				}
+				refs += "/" + string(r.Name)
+			}
+			if refs != tt.wantRefs || len(tls.Options) != tt.wantOpts {
+				t.Errorf("certificateRefs = %q, options = %v; want %q and %d options", refs, tls.Options, tt.wantRefs, tt.wantOpts)
+			}
+			if *tls.Mode != gatewayv1.TLSModeTerminate {
+				t.Errorf("mode = %s", *tls.Mode)
+			}
+		})
+	}
+}
+
+func TestNoHTTP(t *testing.T) {
+	rt := Routing{Gateway: types.NamespacedName{Namespace: "infra", Name: "public"}, NoHTTP: true, ClusterIssuer: "le"}
+	ls := (&GazetteReconciler{Routing: rt}).listenerSet(routingGazette())
+	if len(ls.Spec.Listeners) != 1 || ls.Spec.Listeners[0].Name != listenerHTTPS {
+		t.Errorf("listeners = %+v, want only https", ls.Spec.Listeners)
+	}
+	for _, o := range RoutingObjects(rt, routingGazette()) {
+		if o.GetName() == redirectName("notes") {
+			t.Error("RoutingObjects has a redirect HTTPRoute without the HTTP listener")
+		}
+	}
+}
+
+func TestRoutingValidate(t *testing.T) {
+	gw := types.NamespacedName{Namespace: "infra", Name: "public"}
+	secret := types.NamespacedName{Namespace: "infra", Name: "wildcard-tls"}
+	opts := map[string]string{"example.io/certificates": "managed"}
+	tests := []struct {
+		name    string
+		routing Routing
+		wantErr bool
+	}{
+		{"routing off", Routing{TLS: ListenerTLS{Certificates: TLSNone}}, false},
+		{"gateway mode ignores TLS", Routing{Mode: ModeGateway, Gateway: gw, TLS: ListenerTLS{Certificates: TLSNone}}, false},
+		{"per Gazette", Routing{Gateway: gw, ClusterIssuer: "le"}, false},
+		{"shared", Routing{Gateway: gw, TLS: ListenerTLS{Certificates: TLSShared, SharedSecret: secret}}, false},
+		{"shared without a Secret", Routing{Gateway: gw, TLS: ListenerTLS{Certificates: TLSShared}}, true},
+		{"none", Routing{Gateway: gw, TLS: ListenerTLS{Certificates: TLSNone, Options: opts}}, false},
+		{"none without options", Routing{Gateway: gw, TLS: ListenerTLS{Certificates: TLSNone}}, true},
+		{"issuer with shared", Routing{Gateway: gw, ClusterIssuer: "le",
+			TLS: ListenerTLS{Certificates: TLSShared, SharedSecret: secret}}, true},
+		{"unknown", Routing{Gateway: gw, TLS: ListenerTLS{Certificates: "wildcard"}}, true},
+		{"bad option key", Routing{Gateway: gw, TLS: ListenerTLS{Options: map[string]string{"Example.io/x": "y"}}}, true},
+		{"too many options", Routing{Gateway: gw, TLS: ListenerTLS{Options: manyOptions(17)}}, true},
+		{"annotations", Routing{Gateway: gw, ListenerSetAnnotations: map[string]string{
+			"example.io/policy": "x", "cert-manager.io/cluster-issuer": "le"}}, false},
+		{"bad annotation key", Routing{Gateway: gw, ListenerSetAnnotations: map[string]string{"a b": "x"}}, true},
+		{"cert-manager annotation with a ClusterIssuer", Routing{Gateway: gw, ClusterIssuer: "le",
+			ListenerSetAnnotations: map[string]string{"cert-manager.io/cluster-issuer": "le"}}, true},
+		{"other annotation with a ClusterIssuer", Routing{Gateway: gw, ClusterIssuer: "le",
+			ListenerSetAnnotations: map[string]string{"example.io/policy": "x"}}, false},
+		{"as many options as fit", Routing{Gateway: gw, TLS: ListenerTLS{Options: manyOptions(16)}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.routing.Validate(); (err != nil) != tt.wantErr {
+				t.Errorf("Validate() = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestRoutingCleanup changes press's configuration under existing objects:
+// the Certificate goes with the ClusterIssuer, the redirect with the HTTP
+// listener, and the shared Secret's grants follow the Secret.
+func TestRoutingCleanup(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := gatewayv1.Install(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := v1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	s.AddKnownTypeWithName(certificateGVK, &unstructured.Unstructured{})
+	g := routingGazette()
+	g.UID = "uid"
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(g).Build()
+	ctx := t.Context()
+	gw := types.NamespacedName{Namespace: "infra", Name: "public"}
+	herald := types.NamespacedName{Namespace: "manifesto-system", Name: "manifesto-herald"}
+	r := &GazetteReconciler{Client: c, Scheme: s, Routing: Routing{Gateway: gw, Herald: herald, ClusterIssuer: "le"}}
+	if _, err := r.reconcileRouting(ctx, g, ""); err != nil {
+		t.Fatal(err)
+	}
+	present := func(o client.Object) bool {
+		err := c.Get(ctx, client.ObjectKeyFromObject(o), o)
+		if err != nil && !apierrors.IsNotFound(err) {
+			t.Fatal(err)
+		}
+		return err == nil
+	}
+	redirect := &gatewayv1.HTTPRoute{Namespace: g.Namespace, Name: redirectName(g.Name)}
+	if !present(certificateRef(g)) || !present(redirect) {
+		t.Fatal("the Certificate and redirect were not created")
+	}
+
+	// A Certificate of the user's own, under the name press would use, is
+	// not press's to delete.
+	other := routingGazette()
+	other.Name = "mine"
+	userCert := certificateRef(other)
+	userCert.Object["spec"] = map[string]any{"secretName": "mine-tls"}
+	if err := c.Create(ctx, userCert); err != nil {
+		t.Fatal(err)
+	}
+	r.Routing.ClusterIssuer = ""
+	if _, err := r.reconcileRouting(ctx, other, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !present(certificateRef(other)) {
+		t.Error("press deleted a Certificate it did not create")
+	}
+
+	opts := map[string]string{"example.io/certificates": "managed"}
+	r.Routing = Routing{Gateway: gw, Herald: herald, NoHTTP: true, TLS: ListenerTLS{Certificates: TLSNone, Options: opts}}
+	if _, err := r.reconcileRouting(ctx, g, ""); err != nil {
+		t.Fatal(err)
+	}
+	if present(certificateRef(g)) || present(redirect) {
+		t.Error("the Certificate or redirect outlived the configuration that created them")
+	}
+
+	grants := func() []string {
+		var list gatewayv1.ReferenceGrantList
+		if err := c.List(ctx, &list, client.MatchingLabels{labelGrant: "tls"}); err != nil {
+			t.Fatal(err)
+		}
+		names := make([]string, 0, len(list.Items))
+		for _, gr := range list.Items {
+			names = append(names, gr.Namespace+"/"+gr.Name)
+		}
+		return names
+	}
+	for _, step := range []struct {
+		tls  ListenerTLS
+		want string
+	}{
+		{ListenerTLS{Certificates: TLSShared, SharedSecret: types.NamespacedName{Namespace: "infra", Name: "wildcard"}}, "[infra/manifesto-blog-alice.tls]"},
+		{ListenerTLS{Certificates: TLSShared, SharedSecret: types.NamespacedName{Namespace: "certs", Name: "wildcard"}}, "[certs/manifesto-blog-alice.tls]"},
+		{ListenerTLS{}, "[]"},
+	} {
+		r.Routing.TLS = step.tls
+		if err := r.reconcileReferenceGrant(ctx, g.Namespace); err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprint(grants()); got != step.want {
+			t.Errorf("with %+v, grants = %s, want %s", step.tls, got, step.want)
+		}
+	}
+}
+
+func manyOptions(n int) map[string]string {
+	m := map[string]string{}
+	for i := range n {
+		m[fmt.Sprintf("example.io/option-%d", i)] = "on"
+	}
+	return m
+}
+
+func TestListenerSetAnnotations(t *testing.T) {
+	ann := map[string]string{"example.io/policy": "strict"}
+	ls := (&GazetteReconciler{Routing: Routing{ListenerSetAnnotations: ann}}).listenerSet(routingGazette())
+	if ls.Annotations["example.io/policy"] != "strict" {
+		t.Errorf("annotations = %v", ls.Annotations)
+	}
+	ann["example.io/policy"] = "changed"
+	if ls.Annotations["example.io/policy"] != "strict" {
+		t.Error("the ListenerSet shares its annotations map with the configuration")
+	}
+	if ls := (&GazetteReconciler{}).listenerSet(routingGazette()); ls.Annotations != nil {
+		t.Errorf("annotations = %v, want none", ls.Annotations)
 	}
 }

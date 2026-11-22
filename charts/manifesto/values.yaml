@@ -34,10 +34,35 @@ press:
     mode: listenerset
     # gateway mode: the Gateway listener (sectionName) to attach to.
     gatewaySection: ""
-    # listenerset mode: listener ports and the cert-manager ClusterIssuer.
+    # listenerset mode: listener ports and the cert-manager ClusterIssuer
+    # (perGazette certificates only). listenerHTTPPort 0 leaves out the HTTP
+    # listener and its redirect to HTTPS.
     listenerHTTPSPort: 443
     listenerHTTPPort: 80
     clusterIssuer: ""
+    # listenerset mode: annotations on every ListenerSet (press's and the
+    # chart's desk and darkroom ones), for controllers that read them, e.g.
+    # a certificate controller. Keys under cert-manager.io/ cannot be
+    # combined with clusterIssuer.
+    listenerSetAnnotations: {}
+    # listenerset mode: TLS of each HTTPS listener, the chart's desk and
+    # darkroom routes included.
+    tls:
+      # perGazette: Secret manifesto-<gazette>-tls in the Gazette's namespace
+      #   (manifesto-<component>-tls for desk and darkroom), signed by
+      #   clusterIssuer when set.
+      # shared: sharedSecret for every listener, e.g. a wildcard certificate;
+      #   press and the chart add the ReferenceGrants that allow it.
+      # none: no certificateRefs; the Gateway implementation provides the
+      #   certificates, as options tell it.
+      certificateRefs: perGazette
+      # shared: the Secret, as <namespace>/<name>. Its namespace must exist
+      # before install: the chart puts a ReferenceGrant there when desk.route
+      # or darkroom.route creates a ListenerSet.
+      sharedSecret: ""
+      # Copied to each HTTPS listener's tls.options (implementation-specific):
+      # at most 16, keys such as example.io/option, values strings.
+      options: {}
   extraArgs: []
   resources:
     limits: {cpu: 500m, memory: 128Mi}

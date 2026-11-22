@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -117,6 +118,43 @@ var _ = Describe("Gazette routing", func() {
 		By("removing the ReferenceGrant with the namespace's last Gazette")
 		Expect(k8sClient.Delete(ctx, g)).To(Succeed())
 		Eventually(func() bool { return apierrors.IsNotFound(exists(grant)()) }, timeout, interval).Should(BeTrue())
+	})
+
+	It("builds TLS settings the API server accepts", func() {
+		// The objects are applied as press would, without a reconciler using
+		// these settings: the API server's CEL rules are what is tested.
+		ns := newNamespace()
+		secretNS := newNamespace()
+		opts := map[string]string{"example.io/certificates": "managed"}
+		for i, tls := range []ListenerTLS{
+			{Certificates: TLSShared, SharedSecret: types.NamespacedName{Namespace: secretNS, Name: "wildcard"}, Options: opts},
+			{Certificates: TLSNone, Options: opts},
+		} {
+			rt := testRouting
+			rt.ClusterIssuer, rt.NoHTTP, rt.TLS = "", i == 1, tls
+			Expect(rt.Validate()).To(Succeed())
+			g := newGazette(ns, fmt.Sprintf("tls-%d", i), fmt.Sprintf("tls-%d.%s.example.io", i, ns))
+			for _, obj := range RoutingObjects(rt, g) {
+				Expect(applyObject(ctx, k8sClient, k8sClient.Scheme(), obj)).To(Succeed(), "%s %s", obj.GetObjectKind(), obj.GetName())
+			}
+		}
+		Expect(applyObject(ctx, k8sClient, k8sClient.Scheme(),
+			tlsGrant(types.NamespacedName{Namespace: secretNS, Name: "wildcard"}, ns))).To(Succeed())
+	})
+
+	It("drops ListenerSet annotations removed from the configuration", func() {
+		ns := newNamespace()
+		g := newGazette(ns, "annotated", "annotated."+ns+".example.io")
+		rt := testRouting
+		rt.ListenerSetAnnotations = map[string]string{"example.io/a": "1", "example.io/b": "2"}
+		r := &GazetteReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Routing: rt}
+		Expect(r.apply(ctx, nil, r.listenerSet(g))).To(Succeed())
+		delete(r.Routing.ListenerSetAnnotations, "example.io/b")
+		ls := r.listenerSet(g)
+		Expect(r.apply(ctx, nil, ls)).To(Succeed())
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(ls), ls)).To(Succeed())
+		Expect(ls.Annotations).To(HaveKeyWithValue("example.io/a", "1"))
+		Expect(ls.Annotations).NotTo(HaveKey("example.io/b"))
 	})
 
 	It("does not route a Gazette that claims a reserved domain", func() {
