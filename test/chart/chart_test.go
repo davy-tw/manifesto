@@ -459,16 +459,23 @@ func TestChartRouteTLS(t *testing.T) {
 	base := chartRouteBase
 	objs, err := helmTemplate(t, append(slices.Clone(base), "press.routing.listenerHTTPPort=0",
 		"press.routing.tls.certificateRefs=shared", "press.routing.tls.sharedSecret=certs/wildcard",
-		`press.routing.tls.options.example\.io/profile=modern`)...)
+		`press.routing.tls.options.example\.io/profile=modern`,
+		// YAML syntax and numbers in values must come through as strings.
+		`press.routing.tls.options.example\.io/note=a: b #c`, `press.routing.tls.options.example\.io/n=3`)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := args(t, objs, "manifesto-controller-manager")
 	for _, want := range []string{"--listener-http-port=0", "--listener-tls-certificates=shared",
-		"--listener-tls-secret=certs/wildcard", "--listener-tls-option=example.io/profile=modern"} {
+		"--listener-tls-secret=certs/wildcard", "--listener-tls-option=example.io/profile=modern",
+		"--listener-tls-option=example.io/note=a: b #c", "--listener-tls-option=example.io/n=3"} {
 		if !slices.Contains(a, want) {
 			t.Errorf("press args %v lack %s", a, want)
 		}
+	}
+	ls := convert[gatewayv1.ListenerSet](t, objs["ListenerSet/"+ns+"/manifesto-desk"])
+	if o := ls.Spec.Listeners[0].TLS.Options; o["example.io/note"] != "a: b #c" || o["example.io/n"] != "3" {
+		t.Errorf("listener options = %v", o)
 	}
 	u := objs["ReferenceGrant/certs/manifesto."+ns+".tls"]
 	if u == nil {

@@ -64,7 +64,9 @@ spec:
       {{- end }}
       {{- with $tls.options }}
       options:
-        {{- toYaml . | nindent 8 }}
+        {{- range $k, $v := . }}
+        {{ $k | quote }}: {{ toString $v | quote }}
+        {{- end }}
       {{- end }}
     allowedRoutes:
       namespaces: {from: Same}

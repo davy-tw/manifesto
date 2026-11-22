@@ -76,8 +76,9 @@ spec:
         {{- with $r.tls.sharedSecret }}
         - --listener-tls-secret={{ . }}
         {{- end }}
+        {{- /* Quoted: option values may hold YAML syntax (": ", "#"). */}}
         {{- range $k, $v := $r.tls.options }}
-        - --listener-tls-option={{ $k }}={{ $v }}
+        - {{ printf "--listener-tls-option=%s=%s" $k (toString $v) | quote }}
         {{- end }}
         {{- with $r.clusterIssuer }}
         - --cluster-issuer={{ . }}
