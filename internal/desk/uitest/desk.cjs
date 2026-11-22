@@ -20,8 +20,19 @@ const path = require('path');
     await page.getByRole('heading', { name: 'Choose a publication' }).waitFor();
     // First sign-in: no recent namespaces, and no stray "null" either.
     if ((await page.textContent('#main')).includes('null')) throw new Error('namespace chooser shows "null"');
+    // Alice may not list Gazettes in every namespace: desk asks for one.
+    await page.getByText('Enter the namespace of the Gazette you write for.').waitFor();
+    if (await page.locator('#main .notice').count()) throw new Error('a refused cluster-wide list shows an error');
+    await page.screenshot({ path: path.join(shots, 'desk-home-namespace.png') });
 
     step('open the publication');
+    await page.fill('#home-ns', 'blog-ui');
+    await page.press('#home-ns', 'Enter');
+    await page.getByText('No dispatches yet.').waitFor();
+
+    step('open it again from the namespace box in the header');
+    await page.goto(url + '/#/');
+    await page.getByRole('heading', { name: 'Choose a publication' }).waitFor();
     await page.fill('#ns', 'blog-ui');
     await page.press('#ns', 'Enter');
     await page.getByText('No dispatches yet.').waitFor();
@@ -136,8 +147,10 @@ const path = require('path');
     await tp.screenshot({ path: path.join(shots, 'desk-token-signin.png') });
     await tp.getByRole('button', { name: 'Sign in with token' }).click();
     await tp.locator('#who', { hasText: 'system:serviceaccount:blog-ui:token-user' }).waitFor();
-    await tp.fill('#ns', 'blog-ui');
-    await tp.press('#ns', 'Enter');
+    // This user may list Gazettes everywhere: they are grouped by namespace.
+    await tp.locator('.gazettes .namespace h2', { hasText: 'blog-ui' }).waitFor();
+    await tp.screenshot({ path: path.join(shots, 'desk-home-gazettes.png') });
+    await tp.locator('.gazettes .namespace li a', { hasText: "Alice's Notes" }).click();
     await tp.getByRole('link', { name: 'Edited after restore' }).waitFor();
     await other.close();
     console.log('UI OK');

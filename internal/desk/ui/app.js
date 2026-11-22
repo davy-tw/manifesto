@@ -87,13 +87,64 @@ function route() {
   }
 }
 
+// chooseNamespace lists the Gazettes the user may see in every namespace,
+// grouped by namespace. Most authors may only read their own namespaces, so
+// when Kubernetes refuses the cluster-wide list desk asks for a namespace
+// instead.
 function chooseNamespace() {
   const recent = recentNamespaces();
-  show(
+  const open = (ns) => `#/ns/${encodeURIComponent(ns)}/dispatches`;
+  const input = h('input', { id: 'home-ns', placeholder: 'blog-alice', autocomplete: 'off', required: true, 'aria-label': 'Namespace' });
+  const form = h('form', {
+    class: 'home-ns',
+    onsubmit: (e) => {
+      e.preventDefault();
+      const ns = input.value.trim();
+      if (ns) location.hash = open(ns);
+    },
+  }, input, h('button', { type: 'submit', class: 'primary' }, 'Open'));
+  const gazettes = h('div', { class: 'gazettes' }, h('p', { class: 'muted' }, 'Looking for publications…'));
+  const signal = show(
     h('h1', {}, 'Choose a publication'),
-    h('p', {}, 'Enter the namespace of the Gazette you write for.'),
-    recent.length ? h('ul', { class: 'recent' }, recent.map((n) => h('li', {}, h('a', { href: `#/ns/${encodeURIComponent(n)}/dispatches` }, n)))) : null,
+    gazettes,
+    recent.length ? h('section', {}, h('h2', {}, 'Recent'), h('ul', { class: 'recent' }, recent.map((n) => h('li', {}, h('a', { href: open(n) }, n))))) : null,
   );
+  api.listCluster('gazettes').then((items) => {
+    if (signal.aborted) return;
+    const byNS = new Map();
+    for (const g of items) {
+      const ns = g.metadata.namespace;
+      if (!byNS.has(ns)) byNS.set(ns, []);
+      byNS.get(ns).push(g);
+    }
+    if (!byNS.size) {
+      gazettes.replaceChildren(h('p', {}, 'There are no Gazettes yet. Enter the namespace to write in.'), form);
+      return;
+    }
+    gazettes.replaceChildren(
+      ...[...byNS.keys()].sort().map((ns) =>
+        h('section', { class: 'namespace' },
+          h('h2', {}, h('a', { href: open(ns) }, ns)),
+          h('ul', {}, byNS.get(ns)
+            .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name))
+            .map((g) => h('li', {},
+              h('a', { href: open(ns) }, g.spec.title || g.metadata.name),
+              g.spec.domain ? h('span', { class: 'muted' }, ` ${g.spec.domain}`) : null))),
+        ),
+      ),
+      h('p', {}, 'Or enter another namespace:'),
+      form,
+    );
+  }).catch((err) => {
+    if (signal.aborted) return;
+    if (err.status === 403) {
+      // Not allowed to list every namespace: that is the usual case.
+      gazettes.replaceChildren(h('p', {}, 'Enter the namespace of the Gazette you write for.'), form);
+    } else {
+      gazettes.replaceChildren(failure(err), h('p', {}, 'Enter the namespace of the Gazette you write for.'), form);
+    }
+    input.focus();
+  });
 }
 
 // --- dispatches ----------------------------------------------------------------

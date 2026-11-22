@@ -113,6 +113,15 @@ func TestUI(t *testing.T) {
 		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ui-editor"},
 		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: sa.Name, Namespace: uiNS}}}
 	mustCreate(saBinding, func() error { return admin.Create(ctx, saBinding) })
+	// It may also list Gazettes in every namespace, unlike alice.
+	listAll := &rbacv1.ClusterRole{Name: "ui-list-gazettes", Rules: []rbacv1.PolicyRule{
+		{APIGroups: []string{v1.GroupName}, Resources: []string{"gazettes"}, Verbs: []string{"list"}},
+	}}
+	mustCreate(listAll, func() error { return admin.Create(ctx, listAll) })
+	listAllBinding := &rbacv1.ClusterRoleBinding{Name: "ui-list-gazettes",
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: listAll.Name},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: sa.Name, Namespace: uiNS}}}
+	mustCreate(listAllBinding, func() error { return admin.Create(ctx, listAllBinding) })
 	tr := &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: new(int64(3600))}}
 	if err := admin.SubResource("token").Create(ctx, sa, tr); err != nil {
 		t.Fatal(err)
