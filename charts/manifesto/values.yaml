@@ -77,6 +77,17 @@ darkroom:
     existingClaim: ""
   # Only press may reach darkroom's internal port.
   networkPolicy: true
+  # publicURL is where visitors fetch media, e.g. https://media.example.io:
+  # the publicURL of the pvc (Cluster)Archive darkroom serves, and the
+  # hostname of its route.
+  publicURL: ""
+  # route attaches darkroom's public port to the Gateway, as press routes a
+  # Gazette (see press.routing): an HTTPRoute in gateway mode; a ListenerSet,
+  # HTTPRoutes and a Certificate (with clusterIssuer) in listenerset mode.
+  # parentRefs instead attaches only an HTTPRoute to the parents given.
+  route:
+    enabled: false
+    parentRefs: []
   resources:
     limits: {cpu: 500m, memory: 256Mi}
     requests: {cpu: 10m, memory: 32Mi}
@@ -104,6 +115,11 @@ desk:
     clientSecretName: manifesto-desk-oidc
   # tokenSignIn lets users sign in by pasting a token (kubectl create token).
   tokenSignIn: false
+  # route attaches desk to the Gateway for publicURL's hostname, as
+  # darkroom.route does.
+  route:
+    enabled: false
+    parentRefs: []
   resources:
     limits: {cpu: 500m, memory: 128Mi}
     requests: {cpu: 10m, memory: 32Mi}

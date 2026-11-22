@@ -140,6 +140,21 @@ func (r *GazetteReconciler) reconcileRouting(ctx context.Context, g *v1.Gazette,
 	return routedCondition(cond, ls, route, "ListenerSet", ls.Name), nil
 }
 
+// RoutingObjects are the objects press applies to route g, before it adds
+// the ownerReference and its label. The Helm chart builds the same objects
+// for desk's and darkroom's hostnames; test/chart checks the two agree.
+func RoutingObjects(rt Routing, g *v1.Gazette) []client.Object {
+	r := &GazetteReconciler{Routing: rt}
+	objs := []client.Object{r.httpRoute(g)}
+	if rt.usesListenerSets() {
+		objs = append(objs, r.listenerSet(g), r.redirectRoute(g))
+		if rt.ClusterIssuer != "" {
+			objs = append(objs, r.certificate(g))
+		}
+	}
+	return objs
+}
+
 // routedCondition reads what the Gateway implementation reported on the
 // ListenerSet (nil in ModeGateway) and on the HTTPRoute for the given parent
 // (as returned by the apply).
