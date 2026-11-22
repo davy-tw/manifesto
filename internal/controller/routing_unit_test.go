@@ -7,10 +7,16 @@ SPDX-License-Identifier: MIT
 package controller
 
 import (
+	"context"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	v1 "go.pkgs.davy.tw/manifesto/api/v1alpha1"
@@ -109,5 +115,40 @@ func TestRoutedCondition(t *testing.T) {
 				t.Errorf("reason = %q (%s), want %q", got.Reason, got.Message, tt.want)
 			}
 		})
+	}
+}
+
+// TestApplyBeforeCacheSync covers the first apply of a route: the cache has
+// not seen it yet, so reading it back is NotFound. That is no error, and the
+// route counts as not accepted yet.
+func TestApplyBeforeCacheSync(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := gatewayv1.Install(s); err != nil {
+		t.Fatal(err)
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+			return apierrors.NewNotFound(gatewayv1.Resource("httproutes"), "manifesto-notes")
+		},
+	}).Build()
+
+	r := &GazetteReconciler{Client: c, Scheme: s, Routing: k3sRouting}
+	route := r.httpRoute(routingGazette())
+	if err := r.apply(t.Context(), routingGazette(), route); err != nil {
+		t.Fatalf("apply = %v, want no error before the cache has the route", err)
+	}
+	cond := routedCondition(metav1.Condition{}, nil, route, "Gateway", k3sRouting.Gateway.Name)
+	if cond.Status != metav1.ConditionFalse || cond.Reason != v1.ReasonRoutePending {
+		t.Errorf("Routed = %s/%s, want False/%s", cond.Status, cond.Reason, v1.ReasonRoutePending)
+	}
+
+	failing := fake.NewClientBuilder().WithScheme(s).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+			return apierrors.NewServiceUnavailable("down")
+		},
+	}).Build()
+	r.Client = failing
+	if err := r.apply(t.Context(), routingGazette(), r.httpRoute(routingGazette())); !apierrors.IsServiceUnavailable(err) {
+		t.Errorf("apply = %v, want the read error", err)
 	}
 }
