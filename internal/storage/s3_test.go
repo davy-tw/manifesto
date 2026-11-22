@@ -26,13 +26,23 @@ import (
 
 // newFakeS3 starts an in-memory S3 server with one bucket.
 func newFakeS3(t *testing.T) *S3 {
+	return newFakeS3With(t, nil)
+}
+
+// newFakeS3With starts the fake S3 behind wrap, which can tamper with
+// requests the way a racing uploader or a different service would.
+func newFakeS3With(t *testing.T, wrap func(next http.Handler, backend *s3mem.Backend) http.Handler) *S3 {
 	const bucket = "media"
 	t.Helper()
 	backend := s3mem.New()
 	if err := backend.CreateBucket(bucket); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(gofakes3.New(backend).Server())
+	h := gofakes3.New(backend).Server()
+	if wrap != nil {
+		h = wrap(h, backend)
+	}
+	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return NewS3(S3Config{
 		Endpoint: srv.URL, Bucket: bucket, PathStyle: true,
@@ -236,6 +246,102 @@ func TestS3VerifiesObjectsAtTheObjectKey(t *testing.T) {
 	if got := get(t, d.PublicURL(key)); got != "" {
 		t.Errorf("rejected object still public: %q", got)
 	}
+}
+
+// gofakes3 ignores x-amz-copy-source-if-match and gives copies the source's
+// ETag, so these tests tamper with requests to reach the other branches.
+func TestS3PublishRaces(t *testing.T) {
+	ctx := context.Background()
+	const body, fake = "the real file", "the fake file"
+	key := keyFor(body)
+	size := int64(len(body))
+	isCopy := func(r *http.Request) bool {
+		return r.Method == http.MethodPut && r.Header.Get("X-Amz-Copy-Source") != ""
+	}
+
+	t.Run("a replay between hashing and copying, on a service that ignores the condition", func(t *testing.T) {
+		d := newFakeS3With(t, func(next http.Handler, backend *s3mem.Backend) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if isCopy(r) {
+					if _, err := backend.PutObject("media", StagingPrefix+key, map[string]string{"Content-Type": "text/plain"},
+						strings.NewReader(fake), int64(len(fake)), nil); err != nil {
+						t.Error(err)
+					}
+				}
+				next.ServeHTTP(w, r)
+			})
+		})
+		u, _, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+		put(t, u, "text/plain", body)
+		ok, err := d.Stored(ctx, key, size)
+		if ok || !IsRejected(err) {
+			t.Fatalf("Stored = %v, %v; want the copy rejected", ok, err)
+		}
+		if got := get(t, d.PublicURL(key)); got != "" {
+			t.Errorf("the replayed file is public: %q", got)
+		}
+		if got := get(t, d.PublicURL(StagingPrefix+key)); got != "" {
+			t.Errorf("the replayed upload was kept: %q", got)
+		}
+	})
+
+	t.Run("a service that gives copies their own ETag", func(t *testing.T) {
+		d := newFakeS3With(t, func(next http.Handler, _ *s3mem.Backend) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodHead && !strings.Contains(r.URL.Path, StagingPrefix) {
+					w = etagRewriter{w}
+				}
+				next.ServeHTTP(w, r)
+			})
+		})
+		u, _, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+		put(t, u, "text/plain", body)
+		if ok, err := d.Stored(ctx, key, size); err != nil || !ok {
+			t.Fatalf("Stored = %v, %v", ok, err)
+		}
+		if got := get(t, d.PublicURL(key)); got != body {
+			t.Errorf("public file = %q", got)
+		}
+	})
+
+	t.Run("a copy that shows up late", func(t *testing.T) {
+		var hidden bool
+		d := newFakeS3With(t, func(next http.Handler, _ *s3mem.Backend) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if isCopy(r) {
+					hidden = true
+				} else if hidden && r.Method == http.MethodHead && !strings.Contains(r.URL.Path, StagingPrefix) {
+					hidden = false
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		})
+		u, _, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+		put(t, u, "text/plain", body)
+		if ok, err := d.Stored(ctx, key, size); ok || err != nil {
+			t.Fatalf("first Stored = %v, %v; want not yet", ok, err)
+		}
+		if got := get(t, d.PublicURL(StagingPrefix+key)); got != body {
+			t.Fatalf("the staged upload must be kept until the copy is seen: %q", got)
+		}
+		if ok, err := d.Stored(ctx, key, size); !ok || err != nil {
+			t.Fatalf("second Stored = %v, %v", ok, err)
+		}
+		if got := get(t, d.PublicURL(StagingPrefix+key)); got != "" {
+			t.Errorf("staged upload left behind: %q", got)
+		}
+	})
+}
+
+// etagRewriter answers with a different ETag, as services that encrypt
+// objects do for copies.
+type etagRewriter struct{ http.ResponseWriter }
+
+func (e etagRewriter) WriteHeader(code int) {
+	e.Header().Set("ETag", `"rewritten"`)
+	e.ResponseWriter.WriteHeader(code)
 }
 
 func TestS3PublicURL(t *testing.T) {

@@ -126,6 +126,11 @@ func (d *S3) Stored(ctx context.Context, objectKey string, size int64) (bool, er
 		return false, err
 	}
 	verified.Store(d.cacheKey(objectKey), struct{}{})
+	// Clean up a staged upload left behind, e.g. when the copy only showed
+	// up after publish gave up, or a replay after a restart.
+	if err := d.deleteKey(ctx, StagingPrefix+objectKey); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
@@ -150,9 +155,8 @@ func (d *S3) publish(ctx context.Context, objectKey, want string, size int64) (b
 	}); err != nil {
 		return false, fmt.Errorf("copying the verified upload into place: %w", err)
 	}
-	if err := d.deleteKey(ctx, staging); err != nil {
-		return false, err
-	}
+	// The staged upload is deleted only once the copy is known to be good:
+	// a service that is slow to show the copy is asked again next time.
 	copied, err := d.head(ctx, objectKey)
 	if err != nil || copied == nil {
 		return false, err
@@ -161,10 +165,17 @@ func (d *S3) publish(ctx context.Context, objectKey, want string, size int64) (b
 		// Either the staged upload changed after it was hashed, or the
 		// service gives copies their own ETag: hash the copy itself.
 		if err := d.verify(ctx, objectKey, want, size, copied); err != nil {
+			// The staging key holds the same wrong content.
+			if derr := d.deleteKey(ctx, staging); derr != nil {
+				return false, derr
+			}
 			return false, err
 		}
 	}
 	verified.Store(d.cacheKey(objectKey), struct{}{})
+	if err := d.deleteKey(ctx, staging); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
