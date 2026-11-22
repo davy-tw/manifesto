@@ -357,7 +357,7 @@ status:
 - chart 可選擇性地替 desk 與 darkroom 的公開 port 建立路由（`desk.route`、`darkroom.route`，hostname 取自各自的 `publicURL`）：掛到 press 使用的 Gateway，物件與 press 替同名 Gazette 建的相同（`gateway` 模式一條 HTTPRoute；`listenerset` 模式加上 ListenerSet、轉址 HTTPRoute 與選用的 Certificate），`test/chart` 以 `controller.RoutingObjects` 比對兩者。預設關閉。`listenerset` 模式下這些 ListenerSet 建在 release namespace，Gateway 的 `spec.allowedListeners` 也要允許它。desk 與 darkroom 的 `publicURL` 網域（不論路由是否由 chart 建立）以 `--reserved-domains` 傳給 press，避免租戶的 Gazette 搶走這些網域。Gateway 本身與 ClusterArchive 仍由叢集管理者建立（chart 的 CRD 在 templates 裡，首次安裝時無法同時建立 CR）
 - chart 的 CRD 與 RBAC 不手寫：`make chart` 從 kustomize 的輸出產生 `charts/manifesto/files/`，CI 檢查有沒有過期；`test/chart` 比對兩者的物件、CRD、RBAC 與 Pod 設定
 - CRD 放在 templates（不是 `crds/`），升級時才會更新；CRD 和媒體 PVC 加上 `helm.sh/resource-policy: keep`
-- k3d 的 E2E 用 Helm 安裝（gateway 模式），Kind 的 E2E 用 kustomize
+- Kind 與 k3d 的 E2E 都用 Helm 安裝；k3d 另外開啟 gateway 模式與 desk、darkroom 的 chart 路由。kustomize 的輸出由 `test/chart` 與 chart 比對
 - 發布：`v*` tag 把 image（linux/amd64、linux/arm64）與 chart（OCI）推到 ghcr.io，GoReleaser 把 mfctl（Linux、macOS、Windows、FreeBSD，amd64 與 arm64）放到 GitHub Release；chart 的 image 預設是 `ghcr.io/davy-tw/manifesto-<元件>`，tag 是 chart 的 appVersion
 
 ## desk（管理介面）

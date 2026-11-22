@@ -80,7 +80,7 @@ M1（MVP）、M2（內容與網站）、M3（媒體，PVC 與 S3 後端）、M4�
 - 角色：`config/rbac/manifesto_roles.yaml`（envtest 在 `test/rbac`）
 - mfctl：`internal/mfctl`（cobra；`typeset build`、`print upload`、`edition list|show|restore`，envtest 內跑 press 與 darkroom）與 `cmd/mfctl`
 - 發布：`v*` tag 觸發 `.github/workflows/release.yml`（image 推 ghcr.io、chart 推成 OCI、GoReleaser 發布 mfctl，`.goreleaser.yaml`）；`release-check.yml` 在相關檔案改動時試跑不發布；Dockerfile 在建置平台交叉編譯，多架構不需 QEMU
-- Helm chart：`charts/manifesto`（CRD 與 RBAC 由 `make chart` 從 kustomize 輸出產生到 `files/`，不要手改；`test/chart` 比對 chart 與 kustomize；k3d E2E 用 Helm 安裝）
+- Helm chart：`charts/manifesto`（CRD 與 RBAC 由 `make chart` 從 kustomize 輸出產生到 `files/`，不要手改；`test/chart` 比對 chart 與 kustomize；Kind 與 k3d 的 E2E 都用 Helm 安裝，k3d 另外開啟 gateway 模式與 chart 路由）
 - Edition：`internal/controller/edition_controller.go`（內容 digest 改變才建立 `<dispatch>-<n>`，保留 `--editions` 版且總內容不超過 `--edition-bytes`，預設 20 版、2Mi，最新一版一定保留；spec 以 CEL 禁止修改）
 - 測試：envtest 在 `internal/controller`、`api/v1alpha1`；端到端 `internal/herald/milestone_test.go`；Kind 與 k3d（k3s + Traefik，`make test-e2e-k3d`，含 gateway 路由經過 Traefik 的驗證）上的 E2E 在 `test/e2e`，CI 兩者都跑；envtest 用的第三方 CRD 在 `test/crds`
 

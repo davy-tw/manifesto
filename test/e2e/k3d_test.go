@@ -75,32 +75,6 @@ func setupTraefikGateway() {
 	}, 3*time.Minute, 5*time.Second).Should(Succeed(), "Traefik did not program the Gateway")
 }
 
-// installWithHelm installs the chart with the images under test, in gateway
-// routing mode, and waits for press.
-func installWithHelm() {
-	_, err := utils.Run(exec.Command("make", "helm"))
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	// The images under test are loaded into the nodes, not pulled from ghcr.io.
-	// desk and darkroom are routed by the chart, on the Gateway press uses.
-	set := append([]string{"imageRegistry=",
-		"desk.publicURL=https://" + deskDomain, "desk.route.enabled=true",
-		"darkroom.publicURL=https://" + chartMediaDomain, "darkroom.route.enabled=true"}, helmRoutingValues...)
-	for component, image := range map[string]string{
-		"press": managerImage, "herald": heraldImage, "darkroom": darkroomImage, "desk": deskImage,
-	} {
-		repo, tag, _ := strings.Cut(image[strings.LastIndex(image, "/")+1:], ":")
-		repo = image[:strings.LastIndex(image, "/")+1] + repo
-		set = append(set, component+".image.repository="+repo, component+".image.tag="+tag)
-	}
-	args := make([]string, 0, 8+2*len(set))
-	args = append(args, "install", "manifesto", "charts/manifesto", "-n", namespace, "--wait", "--timeout", "5m")
-	for _, s := range set {
-		args = append(args, "--set", s)
-	}
-	_, err = utils.Run(exec.Command("bin/helm", args...))
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install the Helm chart")
-}
-
 // expectServedThroughTraefik checks press routed the Gazette and that a
 // visitor reaching Traefik gets the Dispatch.
 func expectServedThroughTraefik() {
