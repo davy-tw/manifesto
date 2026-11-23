@@ -23,6 +23,8 @@ const path = require('path');
     // Alice may not list Gazettes in every namespace: desk asks for one.
     await page.getByText('Enter the namespace of the Gazette you write for.').waitFor();
     if (await page.locator('#main .notice').count()) throw new Error('a refused cluster-wide list shows an error');
+    const refusal = await page.evaluate(() => sessionStorage.getItem('manifesto.gazetteListRefused'));
+    if (!refusal) throw new Error('the refusal was not remembered');
     await page.screenshot({ path: path.join(shots, 'desk-home-namespace.png') });
 
     step('open the publication');
@@ -154,7 +156,7 @@ const path = require('path');
     await tp.fill('#token', process.env.DESK_UI_TOKEN);
     await tp.screenshot({ path: path.join(shots, 'desk-token-signin.png') });
     // alice's refusal, remembered in this tab, does not apply to another user.
-    await tp.evaluate(() => sessionStorage.setItem('manifesto.gazetteListRefused', 'oidc:alice@example.io'));
+    await tp.evaluate((v) => sessionStorage.setItem('manifesto.gazetteListRefused', v), refusal);
     await tp.getByRole('button', { name: 'Sign in with token' }).click();
     await tp.locator('#who', { hasText: 'system:serviceaccount:blog-ui:token-user' }).waitFor();
     // This user may list Gazettes everywhere: they are grouped by namespace.
