@@ -1,0 +1,16 @@
+# Keeps all but one herald replica serving while nodes are drained.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: herald
+  namespace: system
+  labels:
+    app.kubernetes.io/name: manifesto
+    app.kubernetes.io/component: herald
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: manifesto
+      app.kubernetes.io/component: herald

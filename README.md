@@ -56,6 +56,8 @@ helm install manifesto oci://ghcr.io/davy-tw/charts/manifesto --version <X.Y.Z> 
 | `press.routing.*` | Gateway 路由（`gatewayName`、`gatewayNamespace`、`mode`、`gatewaySection`、`listenerHTTPSPort`、`listenerHTTPPort`、`clusterIssuer`、`listenerSetAnnotations`、`tls`）；`tls` 見下方「listener 的 TLS」 |
 | `press.editions`、`press.editionBytes` | 每篇保留的 Edition 數與內容總量上限（預設 20 版、2Mi），避免修訂版本塞滿 etcd |
 | `darkroom.enabled`、`darkroom.persistence.*` | 媒體（pvc Archive）與它的 PVC；全部用 S3 時可以關掉 |
+| `herald.replicas`、`herald.autoscaling.*`、`herald.podDisruptionBudget.*`、`herald.resources` | herald 的副本數、HorizontalPodAutoscaler（預設關閉，需要 metrics-server，k3s 內建）與 PodDisruptionBudget |
+| `herald.cacheControl` | 頁面的 `Cache-Control`，預設 `no-cache`（每次用 ETag 驗證）；放在 CDN 後面可以設 `s-maxage` 讓 CDN 快取 |
 | `desk.publicURL`、`desk.oidc.*`、`desk.tokenSignIn` | desk 的網址與登入方式 |
 | `desk.route.*`、`darkroom.publicURL`、`darkroom.route.*` | 選用：把 desk 與媒體網域掛到 `press.routing` 的 Gateway，建立的物件跟 press 替 Gazette 建的相同；`route.parentRefs` 改掛到指定的位置。`listenerset` 模式下 `publicURL` 必須是 `https://`。不論是否開啟，desk 與 darkroom 的 `publicURL` 網域都會傳給 press 保留，宣告這些網域的 Gazette 會回報 `DomainReserved` |
 
