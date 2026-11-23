@@ -517,8 +517,17 @@ async function start() {
   let me;
   try {
     me = await api.session();
-  } catch {
-    await signInPage();
+  } catch (err) {
+    if (err.status === 401) {
+      await signInPage();
+      return;
+    }
+    // Still signed in, but desk, the API server or the identity provider
+    // failed for now: signing in again would not help.
+    document.body.replaceChildren(h('main', { class: 'signin' },
+      h('h1', {}, 'Manifesto desk'),
+      notice(`Desk is not available right now: ${err.message || err}`),
+      h('p', {}, h('button', { type: 'button', class: 'primary', onclick: () => location.reload() }, 'Try again'))));
     return;
   }
   subject = [me.username, ...[...(me.groups || [])].sort()].join('\n');

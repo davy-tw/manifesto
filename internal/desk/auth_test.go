@@ -50,6 +50,9 @@ type fakeIssuer struct {
 	failNext int
 	// noIDToken leaves the ID token out of refresh responses.
 	noIDToken bool
+	// badIDTokenNext makes the next refresh return an ID token desk cannot
+	// verify (here: for another audience), after rotating the refresh token.
+	badIDTokenNext bool
 }
 
 func newFakeIssuer(t *testing.T) *fakeIssuer {
@@ -138,6 +141,10 @@ func startFakeIssuer() (*fakeIssuer, error) {
 		if f.noIDToken && r.Form.Get("grant_type") == "refresh_token" {
 			delete(resp, "id_token")
 		}
+		if f.badIDTokenNext && r.Form.Get("grant_type") == "refresh_token" {
+			f.badIDTokenNext = false
+			resp["id_token"] = f.signedIDToken(nonce, "someone-else")
+		}
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 	return f, nil
@@ -146,10 +153,12 @@ func startFakeIssuer() (*fakeIssuer, error) {
 // testGroups are the groups in every ID token the fake issuer signs.
 var testGroups = []string{"blog-alice-editors"}
 
-func (f *fakeIssuer) idToken(nonce string) string {
+func (f *fakeIssuer) idToken(nonce string) string { return f.signedIDToken(nonce, "manifesto-desk") }
+
+func (f *fakeIssuer) signedIDToken(nonce, audience string) string {
 	now := time.Now()
 	claims := map[string]any{
-		"iss": f.URL, "sub": "alice", "aud": "manifesto-desk", "email": "alice@example.io", "name": "Alice",
+		"iss": f.URL, "sub": "alice", "aud": audience, "email": "alice@example.io", "name": "Alice",
 		"groups": testGroups, "iat": now.Unix(), "exp": now.Add(f.lifetime).Unix(),
 	}
 	if nonce != "" {
@@ -415,6 +424,22 @@ func TestRefreshFailures(t *testing.T) {
 		t.Errorf("refresh without an ID token = %d %s", resp.StatusCode, msg)
 	}
 	issuer.noIDToken = false
+
+	// An ID token that does not verify, after the provider rotated the
+	// refresh token: the new refresh token is kept for the retry, also for
+	// a request still carrying the old cookie.
+	b = signIn(t, issuer, a)
+	stale := maps.Clone(b.cookies)
+	issuer.badIDTokenNext = true
+	if got := b.refresh(a); got != http.StatusServiceUnavailable {
+		t.Fatalf("unverifiable ID token: refresh = %d, want 503", got)
+	}
+	if got := refreshWith(a, stale).StatusCode; got != http.StatusServiceUnavailable {
+		t.Errorf("old cookie after the failure: refresh = %d, want 503", got)
+	}
+	if got := b.refresh(a); got != http.StatusNoContent || issuer.reused != 0 {
+		t.Fatalf("retry after an unverifiable ID token = %d, reused %d", got, issuer.reused)
+	}
 
 	// A refused refresh token ends the session.
 	b2 := signIn(t, issuer, a)

@@ -73,6 +73,9 @@ type Auth struct {
 type refreshResult struct {
 	session *Session
 	until   time.Time
+	// retry: the ID token could not be verified this time, and session is
+	// the old one carrying the refresh token to try again with.
+	retry bool
 }
 
 // Timing of sessions.
@@ -292,9 +295,6 @@ func (a *Auth) Logout(w http.ResponseWriter, r *http.Request) {
 // errNoSession means the request carries no usable session.
 var errNoSession = errors.New("not signed in")
 
-// errInvalidIDToken: a refresh returned an ID token that does not verify.
-var errInvalidIDToken = errors.New("invalid ID token on refresh")
-
 // errSessionExpired means the session's ID token expired but it has a
 // refresh token: the browser should POST /auth/refresh and try again.
 var errSessionExpired = errors.New("session expired; refresh it")
@@ -340,7 +340,17 @@ func (a *Auth) Refresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errNoSession.Error(), http.StatusUnauthorized)
 		return
 	}
-	fresh, err := a.refresh(r, s.RefreshToken)
+	fresh, retry, err := a.refresh(r, &s)
+	if err == nil && retry {
+		// Keep the refresh token the provider just issued (the old one is
+		// used up) for the next attempt.
+		if err := a.sealer.SetCookie(w, r, sessionCookie, fresh, a.sessionOptions()); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		http.Error(w, "verifying the renewed session failed; try again", http.StatusServiceUnavailable)
+		return
+	}
 	if err != nil {
 		if !sessionIsOver(err) {
 			// The provider failed or could not be reached; the refresh
@@ -378,19 +388,23 @@ func sessionIsOver(err error) bool {
 		}
 		return code >= 400 && code < 500 && code != http.StatusTooManyRequests
 	}
-	return errors.Is(err, errNoIDToken) || errors.Is(err, errInvalidIDToken)
+	return errors.Is(err, errNoIDToken)
 }
 
-// refresh exchanges refreshToken at most once per refreshGrace in this
-// process.
-func (a *Auth) refresh(r *http.Request, refreshToken string) (*Session, error) {
+// refresh exchanges the refresh token of old at most once per
+// refreshGrace in this process. When the new ID token cannot be verified
+// (for example, fetching the provider's new signing keys failed), retry is
+// true and the session returned is old with the refresh token to try again
+// with: a provider that rotates refresh tokens has already used up old's.
+func (a *Auth) refresh(r *http.Request, old *Session) (s *Session, retry bool, err error) {
+	refreshToken := old.RefreshToken
 	key := sha256.Sum256([]byte(refreshToken))
-	if s, ok := a.recentRefresh(key); ok {
-		return s, nil
+	if res, ok := a.recentRefresh(key); ok {
+		return res.session, res.retry, nil
 	}
 	v, err, _ := a.refreshes.Do(string(key[:]), func() (any, error) {
-		if s, ok := a.recentRefresh(key); ok {
-			return s, nil
+		if res, ok := a.recentRefresh(key); ok {
+			return res, nil
 		}
 		// Not the request's context: a browser that gives up must not
 		// cancel an exchange the provider may already have completed.
@@ -403,13 +417,20 @@ func (a *Auth) refresh(r *http.Request, refreshToken string) (*Session, error) {
 		if raw, _ := tok.Extra("id_token").(string); raw == "" {
 			return nil, errNoIDToken
 		}
+		res := refreshResult{}
 		fresh, err := a.session(ctx, tok, "")
 		if err != nil {
-			return nil, fmt.Errorf("%w: %w", errInvalidIDToken, err)
-		}
-		if fresh.RefreshToken == "" {
-			// The provider does not rotate refresh tokens.
-			fresh.RefreshToken = refreshToken
+			kept := *old
+			if tok.RefreshToken != "" {
+				kept.RefreshToken = tok.RefreshToken
+			}
+			res.session, res.retry = &kept, true
+		} else {
+			if fresh.RefreshToken == "" {
+				// The provider does not rotate refresh tokens.
+				fresh.RefreshToken = refreshToken
+			}
+			res.session = fresh
 		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -422,21 +443,23 @@ func (a *Auth) refresh(r *http.Request, refreshToken string) (*Session, error) {
 				delete(a.refreshed, k)
 			}
 		}
-		a.refreshed[key] = refreshResult{session: fresh, until: now.Add(refreshGrace)}
-		return fresh, nil
+		res.until = now.Add(refreshGrace)
+		a.refreshed[key] = res
+		return res, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return v.(*Session), nil
+	res := v.(refreshResult)
+	return res.session, res.retry, nil
 }
 
-func (a *Auth) recentRefresh(key [sha256.Size]byte) (*Session, bool) {
+func (a *Auth) recentRefresh(key [sha256.Size]byte) (refreshResult, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	v, ok := a.refreshed[key]
 	if !ok || time.Now().After(v.until) {
-		return nil, false
+		return refreshResult{}, false
 	}
-	return v.session, true
+	return v, true
 }
