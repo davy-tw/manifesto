@@ -165,18 +165,20 @@ function chooseNamespace() {
 
 // The cluster-wide Gazette list is refused to most authors. Remember that
 // for the browser session, so the home page does not ask (and the API
-// server does not audit a refusal) every time.
+// server does not audit a refusal) every time. It is remembered for the
+// signed-in user only: another sign-in in the same tab asks again.
 const LIST_REFUSED = 'manifesto.gazetteListRefused';
+let username = '';
 function listRefused() {
   try {
-    return sessionStorage.getItem(LIST_REFUSED) === '1';
+    return username !== '' && sessionStorage.getItem(LIST_REFUSED) === username;
   } catch {
     return false;
   }
 }
 function rememberListRefused() {
   try {
-    sessionStorage.setItem(LIST_REFUSED, '1');
+    if (username) sessionStorage.setItem(LIST_REFUSED, username);
   } catch {
     // storage unavailable
   }
@@ -518,6 +520,7 @@ async function start() {
     await signInPage();
     return;
   }
+  username = me.username;
   document.getElementById('who').textContent = me.name || me.username;
   document.getElementById('who').title = me.username;
   document.getElementById('signout').addEventListener('click', async () => {

@@ -153,6 +153,8 @@ const path = require('path');
     await tp.getByText('the API server did not accept this token').waitFor();
     await tp.fill('#token', process.env.DESK_UI_TOKEN);
     await tp.screenshot({ path: path.join(shots, 'desk-token-signin.png') });
+    // alice's refusal, remembered in this tab, does not apply to another user.
+    await tp.evaluate(() => sessionStorage.setItem('manifesto.gazetteListRefused', 'oidc:alice@example.io'));
     await tp.getByRole('button', { name: 'Sign in with token' }).click();
     await tp.locator('#who', { hasText: 'system:serviceaccount:blog-ui:token-user' }).waitFor();
     // This user may list Gazettes everywhere: they are grouped by namespace.

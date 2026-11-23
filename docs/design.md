@@ -371,7 +371,7 @@ status:
 ## desk（管理介面）
 
 - SPA + 後端；後端負責 OIDC 登入、session cookie，並把請求代理到 API server。SPA 不直接連 API server
-- 首頁以使用者本人的 token 列出所有 namespace 的 Gazette（依 namespace 分組）；RBAC 不允許跨 namespace 列出時（一般作者都是如此）改為請使用者輸入 namespace，並列出最近用過的；被拒絕會記在 `sessionStorage`，同一個瀏覽器 session 不再重試（避免每次回首頁都在稽核紀錄留下一筆 forbidden）。namespace 的文章不依 Gazette 篩選，所以只有 namespace 可以點
+- 首頁以使用者本人的 token 列出所有 namespace 的 Gazette（依 namespace 分組）；RBAC 不允許跨 namespace 列出時（一般作者都是如此）改為請使用者輸入 namespace，並列出最近用過的；被拒絕會依使用者記在 `sessionStorage`，同一個瀏覽器 session、同一個使用者不再重試（避免每次回首頁都在稽核紀錄留下一筆 forbidden）。namespace 的文章不依 Gazette 篩選，所以只有 namespace 可以點
 - Markdown 編輯與即時預覽：預覽呼叫共用的 `internal/render`，套用真正的主題
 - 透過 watch 即時顯示 `phase` 變化
 - 編輯器的 History 列出 Edition，可以把舊版載入編輯器，儲存後即還原
