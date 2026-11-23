@@ -146,6 +146,9 @@ func Upload(ctx context.Context, env *Env, c client.Client, ns string, o UploadO
 		return nil, err
 	}
 	req.Header.Set("Content-Type", o.ContentType)
+	for name, value := range p.Status.UploadHeaders {
+		req.Header.Set(name, value)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("uploading: %w", err)

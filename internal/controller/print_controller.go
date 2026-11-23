@@ -91,6 +91,7 @@ func (r *PrintReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	status := v1.PrintStatus{
 		Phase:              p.Status.Phase,
 		UploadURL:          p.Status.UploadURL,
+		UploadHeaders:      p.Status.UploadHeaders,
 		UploadExpiresAt:    p.Status.UploadExpiresAt,
 		ObjectKey:          objectKey,
 		URL:                p.Status.URL,
@@ -113,7 +114,9 @@ func (r *PrintReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		ready.Status, ready.Reason = metav1.ConditionFalse, v1.ReasonUploadExpired
 		ready.Message = "The file was not uploaded in time; delete this Print and create it again"
 	default:
-		result, err = r.track(ctx, &status, &ready, driver, objectKey, p.Spec.ContentType, p.Spec.Size)
+		// A Ready Print's file was checked when it became Ready.
+		verified := p.Status.Phase == v1.PrintReady && p.Status.ObjectKey == objectKey
+		result, err = r.track(ctx, &status, &ready, driver, objectKey, p.Spec.ContentType, p.Spec.Size, verified)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -130,8 +133,8 @@ func (r *PrintReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 // track checks whether the file is stored and otherwise keeps an upload
 // URL available until it expires.
 func (r *PrintReconciler) track(ctx context.Context, status *v1.PrintStatus, ready *metav1.Condition,
-	driver storage.Driver, objectKey, contentType string, size int64) (ctrl.Result, error) {
-	stored, err := driver.Stored(ctx, objectKey, size)
+	driver storage.Driver, objectKey, contentType string, size int64, verified bool) (ctrl.Result, error) {
+	stored, err := driver.Stored(ctx, objectKey, size, verified)
 	if err != nil {
 		ready.Status, ready.Reason, ready.Message = metav1.ConditionFalse, v1.ReasonBackendError, err.Error()
 		if storage.IsRejected(err) {
@@ -144,7 +147,7 @@ func (r *PrintReconciler) track(ctx context.Context, status *v1.PrintStatus, rea
 	if stored {
 		// Also covers a file another Print of the namespace already stored.
 		status.Phase, status.URL = v1.PrintReady, driver.PublicURL(objectKey)
-		status.UploadURL, status.UploadExpiresAt = "", nil
+		status.UploadURL, status.UploadHeaders, status.UploadExpiresAt = "", nil, nil
 		ready.Status, ready.Reason, ready.Message = metav1.ConditionTrue, reasonStored, "File stored at status.url"
 		return ctrl.Result{}, nil
 	}
@@ -153,21 +156,21 @@ func (r *PrintReconciler) track(ctx context.Context, status *v1.PrintStatus, rea
 	status.Phase, status.URL = v1.PrintPending, ""
 	switch {
 	case status.UploadExpiresAt != nil && !now.Before(status.UploadExpiresAt.Time):
-		status.Phase, status.UploadURL, status.UploadExpiresAt = v1.PrintFailed, "", nil
+		status.Phase, status.UploadURL, status.UploadHeaders, status.UploadExpiresAt = v1.PrintFailed, "", nil, nil
 		ready.Status, ready.Reason = metav1.ConditionFalse, v1.ReasonUploadExpired
 		ready.Message = "The file was not uploaded in time; delete this Print and create it again"
 		return ctrl.Result{}, nil
 	case status.UploadURL == "":
-		u, expires, err := driver.SignUpload(ctx, objectKey, contentType, size, r.Media.uploadTTL())
+		up, err := driver.SignUpload(ctx, objectKey, contentType, size, r.Media.uploadTTL())
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		at := metav1.NewTime(expires)
-		status.UploadURL, status.UploadExpiresAt = u, &at
+		at := metav1.NewTime(up.Expires)
+		status.UploadURL, status.UploadHeaders, status.UploadExpiresAt = up.URL, up.Headers, &at
 	}
 	ready.Status, ready.Reason = metav1.ConditionFalse, reasonAwaitingUpload
-	ready.Message = fmt.Sprintf("PUT the file to status.uploadURL with Content-Type %s before %s",
-		contentType, status.UploadExpiresAt.UTC().Format(time.RFC3339))
+	ready.Message = fmt.Sprintf("PUT the file to status.uploadURL with the headers in status.uploadHeaders before %s",
+		status.UploadExpiresAt.UTC().Format(time.RFC3339))
 	if prev := meta.FindStatusCondition(status.Conditions, v1.ConditionReady); prev != nil && prev.Reason == reasonUploadRejected {
 		// Keep telling the uploader why the last attempt was removed.
 		ready.Reason, ready.Message = prev.Reason, prev.Message

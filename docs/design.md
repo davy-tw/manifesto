@@ -294,6 +294,8 @@ spec:
 status:
   phase: Ready          # Pending / Ready / Failed
   uploadURL: "..."      # 短效簽章網址，只在 Pending 時存在
+  uploadHeaders:        # 上傳時必須帶的 header（已簽進網址），只在 Pending 時存在
+    Content-Type: image/png
   objectKey: 3f1c9a2e-.../sha256/9f2c...e1.png    # <namespace UID>/sha256/<hash>.<ext>
   url: https://media.example.io/3f1c9a2e-.../sha256/9f2c...e1.png
 ```
@@ -301,8 +303,8 @@ status:
 **上傳流程**
 
 1. desk 建立 Print，狀態是 `Pending`
-2. press 簽出 5 分鐘有效的上傳網址並寫進 status（S3 用 presigned PUT，PVC 用 HMAC 簽章）
-3. 瀏覽器直接上傳檔案，不經過 desk
+2. press 簽出 5 分鐘有效的上傳網址並寫進 status（S3 用 presigned PUT，PVC 用 HMAC 簽章），連同上傳時要帶的 header（`status.uploadHeaders`）
+3. 瀏覽器帶著這些 header 直接上傳檔案，不經過 desk
 4. press 核對大小和 sha256，通過就設成 `Ready`；逾時未上傳設成 `Failed` 並清理
 
 **對外提供**
@@ -333,7 +335,11 @@ status:
 - press 無法得知上傳何時完成，Pending 的 Print 每 2 秒檢查一次，直到上傳網址到期；到期仍未上傳就設成 `Failed`
 - Print 不存在或還沒 Ready 時，Markdown 裡的圖片會被移除、連結只留文字，Dispatch 的 `Ready` 回報 `PrintNotReady`
 
-**S3 後端**只用標準 S3 API：presigned `PutObject`（只簽入 Content-Type，上傳者只需帶這個 header；長期快取由 `publicURL` 前的 CDN 或路由設定）、`HeadObject`、`GetObject`、`CopyObject`、`DeleteObject`、`HeadBucket`。presigned URL 無法撤銷，到期前可以重複使用，而且能讀 Print 的人（包括 proofreader）都看得到，所以上傳網址簽給暫存 key `staging/<object key>`，不是訪客讀取的 key。S3 無法在上傳時驗證內容，press 下載暫存檔核對大小與 sha256（`GetObject` 帶 `If-Match`，確保核對的就是 HEAD 看到的版本），相符才 `CopyObject`（帶 `x-amz-copy-source-if-match`）到正式 key，看到正式檔存在且正確後才刪除暫存檔（服務的最終一致性讓複製結果晚一點出現時，下一輪再處理），不符就刪除並回報 `UploadRejected`。正式 key 只有 press 會寫入；複製後的 ETag 和核對過的不同時（服務不支援條件複製，或加密讓 ETag 不是 MD5），press 再下載正式檔核對一次。重放上傳網址只會寫到暫存 key，刪除 Print 時一併清掉；但 Print 刪除後或檔案仍被其他 Print 共用時，到期前的重放沒人清，所以建議 bucket 設 lifecycle rule 讓 `staging/` 下的物件一天後過期。上傳網址沒有簽入大小，持有網址的人到期前可以往暫存 key 放任意大小的檔案（之後會被刪除），簽入 `Content-Length` 留待之後評估。press 重啟後第一次看到正式檔仍會重新核對，核對過的物件記在記憶體中，不重複下載。憑證放在 Secret（`accessKeyID`、`secretAccessKey`），press 直接向 API server 讀取，不快取、不監看所有 Secret，只需要 `get` 權限。
+**S3 後端**只用標準 S3 API：presigned `PutObject`、`HeadObject`、`GetObject`、`CopyObject`、`DeleteObject`、`HeadBucket`。上傳網址簽入 Content-Type 與 `x-amz-checksum-sha256`（檔案的 sha256，本來就在 object key 裡），上傳者照 `status.uploadHeaders` 帶這兩個 header；長期快取由 `publicURL` 前的 CDN 或路由設定。presigned URL 無法撤銷，到期前可以重複使用，而且能讀 Print 的人（包括 proofreader）都看得到，所以上傳網址簽給暫存 key `staging/<object key>`，不是訪客讀取的 key。press 核對暫存檔的大小與 sha256，相符才 `CopyObject`（帶 `x-amz-copy-source-if-match`）到正式 key，看到正式檔存在且正確後才刪除暫存檔（服務的最終一致性讓複製結果晚一點出現時，下一輪再處理），不符就刪除並回報 `UploadRejected`。
+
+核對盡量不下載檔案：支援 checksum 的服務（AWS S3、SeaweedFS 等）收到內容和簽入的 sha256 不符的 PUT 會直接拒收，press 用 `HeadObject`（`x-amz-checksum-mode: ENABLED`）讀出服務算的 sha256 比對即可，`CopyObject` 也會保留 checksum。服務如果只把上傳者宣稱的值存起來而不檢查，HEAD 讀到的就只是簽進網址的期望值，不能採信；所以 press 每個 process、每個 bucket 第一次用到 checksum 時，會往 `staging/manifesto-checksum-probe` 送一個 checksum 故意不符的小 PUT，被拒收（400）才採信 checksum，否則刪掉探測檔，之後一律下載核對。HEAD 沒有回 checksum（服務不支援，或升級前簽出的網址）時也下載核對：`GetObject` 帶 `If-Match`，確保核對的就是 HEAD 看到的版本。
+
+正式 key 只有 press 會寫入；複製後的 ETag 和核對過的不同時（服務不支援條件複製，或加密讓 ETag 不是 MD5），press 再核對正式檔一次。已經 Ready 的 Print 只用 HEAD 確認檔案還在、大小相符，press 重啟也不重新核對，所以重啟不會把所有媒體重新下載一遍；還沒 Ready 而正式 key 已有檔案時（同 namespace 的其他 Print 已經上傳過，或升級前直接傳到正式 key 的檔案）會核對一次。重放上傳網址只會寫到暫存 key，刪除 Print 時一併清掉；但 Print 刪除後或檔案仍被其他 Print 共用時，到期前的重放沒人清，所以建議 bucket 設 lifecycle rule 讓 `staging/` 下的物件一天後過期。上傳網址沒有簽入大小；支援 checksum 的服務只會存下內容正確的檔案，其他服務上，持有網址的人到期前可以往暫存 key 放任意大小的檔案（之後會被刪除）。憑證放在 Secret（`accessKeyID`、`secretAccessKey`），press 直接向 API server 讀取，不快取、不監看所有 Secret，只需要 `get` 權限。
 
 文章內容存在 etcd，所以備份媒體時 etcd 也要一起備份。
 

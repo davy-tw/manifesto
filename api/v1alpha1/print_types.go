@@ -95,6 +95,12 @@ type PrintStatus struct {
 	// +optional
 	UploadURL string `json:"uploadURL,omitempty"`
 
+	// uploadHeaders are the HTTP headers the PUT to uploadURL must send,
+	// such as Content-Type; they are signed into uploadURL. Only set while
+	// the Print is Pending.
+	// +optional
+	UploadHeaders map[string]string `json:"uploadHeaders,omitempty"`
+
 	// uploadExpiresAt is when uploadURL stops working; a Print still Pending
 	// then becomes Failed.
 	// +optional

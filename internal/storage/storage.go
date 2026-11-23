@@ -22,20 +22,28 @@ import (
 
 // Driver is one storage backend.
 type Driver interface {
-	// SignUpload returns a URL the file of size bytes and contentType can be
-	// PUT to until expires. Some backends require the PUT to send
-	// contentType as its Content-Type header.
-	SignUpload(ctx context.Context, objectKey, contentType string, size int64, ttl time.Duration) (url string, expires time.Time, err error)
+	// SignUpload returns where the file of size bytes and contentType can
+	// be PUT until it expires, and the headers the PUT must send.
+	SignUpload(ctx context.Context, objectKey, contentType string, size int64, ttl time.Duration) (Upload, error)
 	// Stored reports whether the object is stored with the given size and
 	// the hash in its key. A backend that cannot verify uploads as they
 	// arrive verifies them here and deletes objects that do not match.
-	Stored(ctx context.Context, objectKey string, size int64) (bool, error)
+	// verified says a Stored call already answered true for this object, so
+	// a backend may only check that it is still there.
+	Stored(ctx context.Context, objectKey string, size int64, verified bool) (bool, error)
 	// Delete removes the object; deleting a missing object is not an error.
 	Delete(ctx context.Context, objectKey string) error
 	// Check reports whether the backend is reachable.
 	Check(ctx context.Context) error
 	// PublicURL is where visitors read the object.
 	PublicURL(objectKey string) string
+}
+
+// Upload is a signed upload: PUT the file to URL with Headers before Expires.
+type Upload struct {
+	URL     string
+	Headers map[string]string
+	Expires time.Time
 }
 
 // ObjectKey is where a file with the given hash and content type is stored
@@ -98,10 +106,14 @@ func (p *PVC) client() *http.Client {
 
 // SignUpload implements Driver. darkroom ignores the Content-Type header and
 // serves files by their extension.
-func (p *PVC) SignUpload(_ context.Context, objectKey, _ string, size int64, ttl time.Duration) (string, time.Time, error) {
+func (p *PVC) SignUpload(_ context.Context, objectKey, contentType string, size int64, ttl time.Duration) (Upload, error) {
 	expires := p.now().Add(ttl).Truncate(time.Second)
 	q := signing.Query(p.Key, http.MethodPut, objectKey, size, expires)
-	return strings.TrimSuffix(p.PublicBase, "/") + "/upload/" + objectKey + "?" + q.Encode(), expires, nil
+	return Upload{
+		URL:     strings.TrimSuffix(p.PublicBase, "/") + "/upload/" + objectKey + "?" + q.Encode(),
+		Headers: map[string]string{"Content-Type": contentType},
+		Expires: expires,
+	}, nil
 }
 
 // PublicURL implements Driver.
@@ -126,7 +138,7 @@ func (p *PVC) internal(ctx context.Context, method, objectKey string) (int, erro
 
 // Stored implements Driver. darkroom verifies size and hash while it
 // receives an upload, so a stored file is a verified file.
-func (p *PVC) Stored(ctx context.Context, objectKey string, _ int64) (bool, error) {
+func (p *PVC) Stored(ctx context.Context, objectKey string, _ int64, _ bool) (bool, error) {
 	code, err := p.internal(ctx, http.MethodHead, objectKey)
 	switch {
 	case err != nil:

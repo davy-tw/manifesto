@@ -10,6 +10,7 @@ package e2e
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os/exec"
@@ -194,17 +195,29 @@ spec:
 			uploadURL = kubectlGet(g, "print", "s3doc", mediaNamespace, "{.status.uploadURL}")
 			g.Expect(uploadURL).To(ContainSubstring("X-Amz-Signature="))
 		}).Should(Succeed())
+		checksum := "x-amz-checksum-sha256: " + base64.StdEncoding.EncodeToString(sum[:])
+		Expect(kubectlGet(Default, "print", "s3doc", mediaNamespace, "{.status.uploadHeaders.X-Amz-Checksum-Sha256}")).
+			To(Equal(strings.TrimPrefix(checksum, "x-amz-checksum-sha256: ")))
 		By("being refused without the signed Content-Type")
 		unsigned := exec.Command("kubectl", "exec", "-i", heraldCurlPod, "-n", namespace, "--",
 			"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "PUT",
-			"-H", "Content-Type: application/octet-stream", "--data-binary", "@-", uploadURL)
+			"-H", "Content-Type: application/octet-stream", "-H", checksum, "--data-binary", "@-", uploadURL)
 		unsigned.Stdin = strings.NewReader(s3Body)
 		code, err := utils.Run(unsigned)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(code).To(Equal("403"), "SeaweedFS must reject a PUT that does not match the signature")
 
+		By("being refused by SeaweedFS when the content does not match the signed sha256")
+		wrong := exec.Command("kubectl", "exec", "-i", heraldCurlPod, "-n", namespace, "--",
+			"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "PUT",
+			"-H", "Content-Type: text/plain", "-H", checksum, "--data-binary", "@-", uploadURL)
+		wrong.Stdin = strings.NewReader(strings.Repeat("x", len(s3Body)))
+		code, err = utils.Run(wrong)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(code).To(Equal("400"), "SeaweedFS must check x-amz-checksum-sha256")
+
 		put := exec.Command("kubectl", "exec", "-i", heraldCurlPod, "-n", namespace, "--",
-			"curl", "-sf", "-X", "PUT", "-H", "Content-Type: text/plain", "--data-binary", "@-", uploadURL)
+			"curl", "-sf", "-X", "PUT", "-H", "Content-Type: text/plain", "-H", checksum, "--data-binary", "@-", uploadURL)
 		put.Stdin = strings.NewReader(s3Body)
 		_, err = utils.Run(put)
 		Expect(err).NotTo(HaveOccurred(), "presigned upload to SeaweedFS failed")
@@ -224,8 +237,8 @@ spec:
 
 		By("replaying the upload URL, which must not replace the verified file")
 		replay := exec.Command("kubectl", "exec", "-i", heraldCurlPod, "-n", namespace, "--",
-			"curl", "-sf", "-X", "PUT", "-H", "Content-Type: text/plain", "--data-binary", "@-", uploadURL)
-		replay.Stdin = strings.NewReader(strings.Repeat("x", len(s3Body)))
+			"curl", "-sf", "-X", "PUT", "-H", "Content-Type: text/plain", "-H", checksum, "--data-binary", "@-", uploadURL)
+		replay.Stdin = strings.NewReader(s3Body)
 		_, err = utils.Run(replay)
 		Expect(err).NotTo(HaveOccurred(), "the presigned URL lands in staging and stays usable")
 		Consistently(func(g Gomega) {

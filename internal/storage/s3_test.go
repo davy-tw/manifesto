@@ -7,14 +7,18 @@ SPDX-License-Identifier: MIT
 package storage
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,10 +54,13 @@ func newFakeS3With(t *testing.T, wrap func(next http.Handler, backend *s3mem.Bac
 	})
 }
 
-func put(t *testing.T, target, contentType, body string) int {
+// upload PUTs body the way press tells uploaders to.
+func upload(t *testing.T, up Upload, body string) int {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPut, target, strings.NewReader(body))
-	req.Header.Set("Content-Type", contentType)
+	req, _ := http.NewRequest(http.MethodPut, up.URL, strings.NewReader(body))
+	for name, value := range up.Headers {
+		req.Header.Set(name, value)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -95,40 +102,48 @@ func TestS3(t *testing.T) {
 	const body = `<svg xmlns="http://www.w3.org/2000/svg"/>`
 	key := keyFor(body)
 	size := int64(len(body))
-	if ok, err := d.Stored(ctx, key, size); err != nil || ok {
+	if ok, err := d.Stored(ctx, key, size, false); err != nil || ok {
 		t.Fatalf("Stored before upload = %v, %v", ok, err)
 	}
 
-	u, expires, err := d.SignUpload(ctx, key, "image/svg+xml", size, 5*time.Minute)
-	if err != nil || time.Until(expires) < 4*time.Minute {
-		t.Fatalf("SignUpload = %v, %v", expires, err)
+	up, err := d.SignUpload(ctx, key, "image/svg+xml", size, 5*time.Minute)
+	if err != nil || time.Until(up.Expires) < 4*time.Minute {
+		t.Fatalf("SignUpload = %v, %v", up.Expires, err)
 	}
-	if !strings.Contains(u, "X-Amz-Signature=") || !strings.Contains(u, "/media/"+StagingPrefix+key+"?") {
-		t.Errorf("not a presigned path-style URL for the staging key: %s", u)
+	if !strings.Contains(up.URL, "X-Amz-Signature=") || !strings.Contains(up.URL, "/media/"+StagingPrefix+key+"?") {
+		t.Errorf("not a presigned path-style URL for the staging key: %s", up.URL)
 	}
 	// gofakes3 does not check signatures, so check what the uploader must
-	// send: exactly the Content-Type, nothing else.
-	parsed, err := url.Parse(u)
+	// send: the Content-Type and the file's sha256, nothing else.
+	parsed, err := url.Parse(up.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := parsed.Query().Get("X-Amz-SignedHeaders"); got != "content-type;host" {
-		t.Errorf("signed headers = %q, want only content-type and host", got)
+	if got := parsed.Query().Get("X-Amz-SignedHeaders"); got != "content-type;host;x-amz-checksum-sha256" {
+		t.Errorf("signed headers = %q", got)
 	}
-	if code := put(t, u, "image/svg+xml", body); code != http.StatusOK {
+	sum := sha256.Sum256([]byte(body))
+	wantHeaders := map[string]string{
+		"Content-Type":          "image/svg+xml",
+		"X-Amz-Checksum-Sha256": base64.StdEncoding.EncodeToString(sum[:]),
+	}
+	if !maps.Equal(up.Headers, wantHeaders) {
+		t.Errorf("headers = %v, want %v", up.Headers, wantHeaders)
+	}
+	if code := upload(t, up, body); code != http.StatusOK {
 		t.Fatalf("PUT = %d", code)
 	}
 	if got := get(t, d.PublicURL(key)); got != "" {
 		t.Fatalf("an unverified upload is public: %q", got)
 	}
-	if ok, err := d.Stored(ctx, key, size); err != nil || !ok {
+	if ok, err := d.Stored(ctx, key, size, false); err != nil || !ok {
 		t.Fatalf("Stored after upload = %v, %v", ok, err)
 	}
 	if got := get(t, d.PublicURL(StagingPrefix+key)); got != "" {
 		t.Errorf("the staged upload was not deleted: %q", got)
 	}
 	// Verified objects are not downloaded again, but must still exist.
-	if ok, _ := d.Stored(ctx, key, size); !ok {
+	if ok, _ := d.Stored(ctx, key, size, true); !ok {
 		t.Error("second Stored = false")
 	}
 
@@ -145,7 +160,7 @@ func TestS3(t *testing.T) {
 	if err := d.Delete(ctx, key); err != nil {
 		t.Fatal(err)
 	}
-	if ok, _ := d.Stored(ctx, key, size); ok {
+	if ok, _ := d.Stored(ctx, key, size, true); ok {
 		t.Error("object still stored after Delete")
 	}
 	if err := d.Delete(ctx, key); err != nil {
@@ -167,13 +182,13 @@ func TestS3RejectsWrongUploads(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := newFakeS3(t)
 			key := keyFor(body)
-			u, _, _ := d.SignUpload(ctx, key, "text/plain", int64(len(body)), time.Minute)
-			put(t, u, "text/plain", tt.uploaded)
-			ok, err := d.Stored(ctx, key, int64(len(body)))
+			up, _ := d.SignUpload(ctx, key, "text/plain", int64(len(body)), time.Minute)
+			upload(t, up, tt.uploaded)
+			ok, err := d.Stored(ctx, key, int64(len(body)), false)
 			if ok || !IsRejected(err) {
 				t.Fatalf("Stored = %v, %v; want a rejection", ok, err)
 			}
-			if ok, err := d.Stored(ctx, key, int64(len(body))); ok || err != nil {
+			if ok, err := d.Stored(ctx, key, int64(len(body)), false); ok || err != nil {
 				t.Errorf("the rejected object must be gone: %v, %v", ok, err)
 			}
 		})
@@ -188,26 +203,26 @@ func TestS3ReplayedUploadCannotReplaceTheFile(t *testing.T) {
 	const body, fake = "the real file", "the fake file"
 	key := keyFor(body)
 	size := int64(len(body))
-	u, _, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
-	put(t, u, "text/plain", body)
-	if ok, err := d.Stored(ctx, key, size); err != nil || !ok {
+	up, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+	upload(t, up, body)
+	if ok, err := d.Stored(ctx, key, size, false); err != nil || !ok {
 		t.Fatalf("Stored = %v, %v", ok, err)
 	}
 
-	if code := put(t, u, "text/plain", fake); code != http.StatusOK {
+	// gofakes3 does not check the signed checksum, so the replay lands.
+	if code := upload(t, up, fake); code != http.StatusOK {
 		t.Fatalf("replayed PUT = %d", code)
 	}
-	if ok, err := d.Stored(ctx, key, size); err != nil || !ok {
+	if ok, err := d.Stored(ctx, key, size, true); err != nil || !ok {
 		t.Errorf("Stored after a replayed PUT = %v, %v", ok, err)
 	}
 	if got := get(t, d.PublicURL(key)); got != body {
 		t.Errorf("public file = %q, want %q", got, body)
 	}
 
-	// After a restart press hashes the file again; it is still the real one.
-	verified.Delete(d.cacheKey(key))
-	if ok, err := d.Stored(ctx, key, size); err != nil || !ok {
-		t.Errorf("Stored after a restart = %v, %v", ok, err)
+	// Checking the file again finds the real one.
+	if ok, err := d.Stored(ctx, key, size, false); err != nil || !ok {
+		t.Errorf("Stored checking again = %v, %v", ok, err)
 	}
 
 	// Deleting the file also removes the replayed upload.
@@ -237,8 +252,7 @@ func TestS3VerifiesObjectsAtTheObjectKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verified.Delete(d.cacheKey(key))
-		ok, err := d.Stored(ctx, key, size)
+		ok, err := d.Stored(ctx, key, size, false)
 		if ok != tt.stored || (!tt.stored && !IsRejected(err)) {
 			t.Errorf("Stored(%q) = %v, %v", tt.content, ok, err)
 		}
@@ -271,9 +285,9 @@ func TestS3PublishRaces(t *testing.T) {
 				next.ServeHTTP(w, r)
 			})
 		})
-		u, _, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
-		put(t, u, "text/plain", body)
-		ok, err := d.Stored(ctx, key, size)
+		up, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+		upload(t, up, body)
+		ok, err := d.Stored(ctx, key, size, false)
 		if ok || !IsRejected(err) {
 			t.Fatalf("Stored = %v, %v; want the copy rejected", ok, err)
 		}
@@ -294,9 +308,9 @@ func TestS3PublishRaces(t *testing.T) {
 				next.ServeHTTP(w, r)
 			})
 		})
-		u, _, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
-		put(t, u, "text/plain", body)
-		if ok, err := d.Stored(ctx, key, size); err != nil || !ok {
+		up, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+		upload(t, up, body)
+		if ok, err := d.Stored(ctx, key, size, false); err != nil || !ok {
 			t.Fatalf("Stored = %v, %v", ok, err)
 		}
 		if got := get(t, d.PublicURL(key)); got != body {
@@ -318,15 +332,15 @@ func TestS3PublishRaces(t *testing.T) {
 				next.ServeHTTP(w, r)
 			})
 		})
-		u, _, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
-		put(t, u, "text/plain", body)
-		if ok, err := d.Stored(ctx, key, size); ok || err != nil {
+		up, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+		upload(t, up, body)
+		if ok, err := d.Stored(ctx, key, size, false); ok || err != nil {
 			t.Fatalf("first Stored = %v, %v; want not yet", ok, err)
 		}
 		if got := get(t, d.PublicURL(StagingPrefix+key)); got != body {
 			t.Fatalf("the staged upload must be kept until the copy is seen: %q", got)
 		}
-		if ok, err := d.Stored(ctx, key, size); !ok || err != nil {
+		if ok, err := d.Stored(ctx, key, size, false); !ok || err != nil {
 			t.Fatalf("second Stored = %v, %v", ok, err)
 		}
 		if got := get(t, d.PublicURL(StagingPrefix+key)); got != "" {
@@ -352,5 +366,137 @@ func TestS3PublicURL(t *testing.T) {
 	d = NewS3(S3Config{Endpoint: "http://seaweedfs:8333", Bucket: "media", PublicURL: "https://cdn.example.io/"})
 	if got := d.PublicURL("k"); got != "https://cdn.example.io/k" {
 		t.Errorf("PublicURL = %q", got)
+	}
+}
+
+// checksumS3 wraps gofakes3 with x-amz-checksum-sha256 support, which
+// gofakes3 lacks: it remembers the checksum of each PUT, keeps it on
+// copies and reports it on HEAD with x-amz-checksum-mode: ENABLED. If check
+// is set it refuses a PUT whose body does not match, as S3 does; otherwise
+// it stores the uploader's claim unchecked. It counts object GETs.
+type checksumS3 struct {
+	check bool
+	mu    sync.Mutex
+	sums  map[string]string
+	gets  int
+}
+
+func (c *checksumS3) wrap(next http.Handler, _ *s3mem.Backend) http.Handler {
+	c.sums = map[string]string{}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.URL.Path, "/media/")
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		switch {
+		case r.Method == http.MethodPut && r.Header.Get("X-Amz-Copy-Source") != "":
+			src, _ := url.PathUnescape(strings.TrimPrefix(strings.TrimPrefix(r.Header.Get("X-Amz-Copy-Source"), "/"), "media/"))
+			c.sums[key] = c.sums[src]
+		case r.Method == http.MethodPut:
+			body, _ := io.ReadAll(r.Body)
+			claim := r.Header.Get("X-Amz-Checksum-Sha256")
+			sum := sha256.Sum256(body)
+			if c.check && claim != "" && claim != base64.StdEncoding.EncodeToString(sum[:]) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `<Error><Code>BadDigest</Code></Error>`)
+				return
+			}
+			c.sums[key] = claim
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		case r.Method == http.MethodHead && r.Header.Get("X-Amz-Checksum-Mode") == "ENABLED":
+			if sum := c.sums[key]; sum != "" {
+				w.Header().Set("X-Amz-Checksum-Sha256", sum)
+			}
+		case r.Method == http.MethodGet && key != "":
+			c.gets++
+		case r.Method == http.MethodDelete:
+			delete(c.sums, key)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (c *checksumS3) downloads() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.gets
+}
+
+func TestS3UsesTheChecksumTheServiceComputed(t *testing.T) {
+	ctx := context.Background()
+	const body, fake = "the real file", "the fake file"
+	key := keyFor(body)
+	size := int64(len(body))
+
+	t.Run("a service that checks checksums", func(t *testing.T) {
+		fake3 := &checksumS3{check: true}
+		d := newFakeS3With(t, fake3.wrap)
+		up, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+		if code := upload(t, up, fake); code != http.StatusBadRequest {
+			t.Errorf("PUT of other content = %d, want the service to refuse it", code)
+		}
+		if code := upload(t, up, body); code != http.StatusOK {
+			t.Fatalf("PUT = %d", code)
+		}
+		if ok, err := d.Stored(ctx, key, size, false); err != nil || !ok {
+			t.Fatalf("Stored = %v, %v", ok, err)
+		}
+		// The copy keeps the checksum, so checking the object key again
+		// does not download it either.
+		if ok, err := d.Stored(ctx, key, size, false); err != nil || !ok {
+			t.Fatalf("Stored checking again = %v, %v", ok, err)
+		}
+		if n := fake3.downloads(); n != 0 {
+			t.Errorf("press downloaded the file %d times", n)
+		}
+		if got := get(t, d.PublicURL(key)); got != body {
+			t.Errorf("public file = %q", got)
+		}
+		if got := get(t, d.PublicURL(checksumProbe)); got != "" {
+			t.Errorf("the probe was stored: %q", got)
+		}
+	})
+
+	t.Run("a service that stores checksums unchecked", func(t *testing.T) {
+		fake3 := &checksumS3{}
+		d := newFakeS3With(t, fake3.wrap)
+		up, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+		// The checksum the service reports is the signed claim, not the
+		// content: press must download the file.
+		upload(t, up, fake)
+		if ok, err := d.Stored(ctx, key, size, false); ok || !IsRejected(err) {
+			t.Fatalf("Stored = %v, %v; want a rejection", ok, err)
+		}
+		upload(t, up, body)
+		if ok, err := d.Stored(ctx, key, size, false); err != nil || !ok {
+			t.Fatalf("Stored = %v, %v", ok, err)
+		}
+		if got := get(t, d.PublicURL(checksumProbe)); got != "" {
+			t.Errorf("the probe was left behind: %q", got)
+		}
+	})
+}
+
+// A Print that is Ready was checked already: press only looks for the file.
+func TestS3TrustsVerifiedObjects(t *testing.T) {
+	ctx := context.Background()
+	const body = "the real file"
+	key := keyFor(body)
+	size := int64(len(body))
+	fake3 := &checksumS3{}
+	d := newFakeS3With(t, fake3.wrap)
+	if _, err := d.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String("media"), Key: aws.String(key), Body: strings.NewReader(body),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := d.Stored(ctx, key, size, true); err != nil || !ok {
+		t.Fatalf("Stored = %v, %v", ok, err)
+	}
+	if n := fake3.downloads(); n != 0 {
+		t.Errorf("press downloaded a verified file %d times", n)
+	}
+	// A file of the wrong size is checked (and rejected) all the same.
+	if ok, err := d.Stored(ctx, key, size+1, true); ok || !IsRejected(err) {
+		t.Errorf("Stored with another size = %v, %v", ok, err)
 	}
 }

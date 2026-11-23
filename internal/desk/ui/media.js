@@ -45,7 +45,8 @@ export async function upload(ns, file, { name, alt, archiveRef }, onStep = () =>
   const p = await waitFor(ns, name, (p) => p.status?.phase === 'Ready' || p.status?.uploadURL, 60000);
   if (p.status.phase === 'Ready') return p;
   onStep('Uploading');
-  const res = await fetch(p.status.uploadURL, { method: 'PUT', body: file, headers: { 'Content-Type': contentType } });
+  const headers = { 'Content-Type': contentType, ...(p.status.uploadHeaders || {}) };
+  const res = await fetch(p.status.uploadURL, { method: 'PUT', body: file, headers });
   if (!res.ok) throw new Error(`upload refused (${res.status})`);
   onStep('Verifying');
   return waitFor(ns, name, (p) => p.status?.phase === 'Ready', 120000);
