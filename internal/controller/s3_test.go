@@ -60,7 +60,9 @@ var _ = Describe("S3 media", func() {
 		p := newPrint(ns, "doc", v1.ArchiveRef{Kind: v1.KindArchive, Name: "bucket"}, body)
 		Expect(k8sClient.Create(ctx, p)).To(Succeed())
 		Eventually(fetch(p), timeout, interval).Should(WithTransform(uploadURL, ContainSubstring("X-Amz-Signature=")))
-		Expect(condition(p.Status.Conditions, v1.ConditionReady).Message).To(ContainSubstring("Content-Type text/plain"))
+		Expect(condition(p.Status.Conditions, v1.ConditionReady).Message).To(ContainSubstring("status.uploadHeaders"))
+		Expect(p.Status.UploadHeaders).To(HaveKeyWithValue("Content-Type", "text/plain"))
+		Expect(p.Status.UploadHeaders).To(HaveKey("X-Amz-Checksum-Sha256"))
 
 		By("rejecting and deleting the wrong file")
 		Expect(putWithType(p.Status.UploadURL, "text/plain", strings.Repeat("x", len(body)))).To(Equal(http.StatusOK))

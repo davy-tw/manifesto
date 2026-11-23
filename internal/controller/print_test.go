@@ -94,6 +94,7 @@ var _ = Describe("Media", func() {
 		Expect(first.Status.Phase).To(Equal(v1.PrintPending))
 		Expect(first.Status.ObjectKey).To(Equal(string(nsObj.UID) + "/sha256/" + first.Spec.SHA256 + ".txt"))
 		Expect(first.Status.UploadExpiresAt).NotTo(BeNil())
+		Expect(first.Status.UploadHeaders).To(Equal(map[string]string{"Content-Type": first.Spec.ContentType}))
 		Expect(first.Finalizers).To(ContainElement(v1.PrintFinalizer))
 		Expect(readyReason(first.Status.Conditions)).To(Equal("False/" + reasonAwaitingUpload))
 
@@ -107,6 +108,7 @@ var _ = Describe("Media", func() {
 		Eventually(fetch(first), timeout, interval).Should(WithTransform(phaseOfPrint, Equal(v1.PrintReady)))
 		Expect(first.Status.URL).To(Equal(darkroomPublic.URL + "/" + first.Status.ObjectKey))
 		Expect(first.Status.UploadURL).To(BeEmpty())
+		Expect(first.Status.UploadHeaders).To(BeEmpty())
 		code, got := httpDo(http.MethodGet, first.Status.URL, "")
 		Expect(code).To(Equal(http.StatusOK))
 		Expect(got).To(Equal(body))
