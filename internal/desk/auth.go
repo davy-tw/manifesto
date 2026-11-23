@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/go-logr/logr"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/singleflight"
 )
@@ -66,6 +67,11 @@ type Auth struct {
 	refreshes singleflight.Group
 	mu        sync.Mutex
 	refreshed map[[sha256.Size]byte]refreshResult
+	// retriedFrom maps a refresh token kept by a retry result to the
+	// refresh token it replaced, so the outcome of the retry also answers
+	// requests still carrying the older one.
+	retriedFrom map[[sha256.Size]byte][sha256.Size]byte
+	log         logr.Logger
 }
 
 // refreshResult is the session a refresh token was exchanged for, kept for
@@ -106,6 +112,8 @@ type AuthConfig struct {
 	Secure bool
 	// HTTPClient talks to the provider; nil uses the default client.
 	HTTPClient *http.Client
+	// Log records failed refreshes; the zero value discards.
+	Log logr.Logger
 }
 
 // NewAuth discovers the issuer, if any, and returns an Auth.
@@ -113,7 +121,7 @@ func NewAuth(ctx context.Context, cfg AuthConfig, sealer *Sealer) (*Auth, error)
 	if cfg.Issuer == "" && !cfg.TokenSignIn {
 		return nil, errors.New("no sign-in method: set an OIDC issuer or allow token sign-in")
 	}
-	a := &Auth{sealer: sealer, secure: cfg.Secure, client: cfg.HTTPClient, tokens: cfg.TokenSignIn}
+	a := &Auth{sealer: sealer, secure: cfg.Secure, client: cfg.HTTPClient, tokens: cfg.TokenSignIn, log: cfg.Log}
 	if cfg.Issuer == "" {
 		return a, nil
 	}
@@ -374,6 +382,18 @@ func (a *Auth) Refresh(w http.ResponseWriter, r *http.Request) {
 var errNoIDToken = errors.New("the provider returned no ID token on refresh; " +
 	"desk needs one (check the provider's client settings)")
 
+// keysUnavailable reports whether verifying an ID token failed only
+// because the provider's signing keys could not be fetched, e.g. right after
+// it rotated them. go-oidc does not wrap that error, so this matches its
+// message; when it no longer matches, failures end the session as any other
+// invalid ID token does.
+func keysUnavailable(err error) bool {
+	return strings.Contains(err.Error(), "fetching keys")
+}
+
+// errInvalidIDToken: a refresh returned an ID token desk will not accept.
+var errInvalidIDToken = errors.New("invalid ID token on refresh")
+
 // sessionIsOver reports whether a failed refresh ended the session: the
 // provider refused the refresh token, or answered with something desk
 // cannot use. Anything else (5xx, timeouts, network errors) may pass.
@@ -388,12 +408,12 @@ func sessionIsOver(err error) bool {
 		}
 		return code >= 400 && code < 500 && code != http.StatusTooManyRequests
 	}
-	return errors.Is(err, errNoIDToken)
+	return errors.Is(err, errNoIDToken) || errors.Is(err, errInvalidIDToken)
 }
 
 // refresh exchanges the refresh token of old at most once per
 // refreshGrace in this process. When the new ID token cannot be verified
-// (for example, fetching the provider's new signing keys failed), retry is
+// for now (fetching the provider's new signing keys failed), retry is
 // true and the session returned is old with the refresh token to try again
 // with: a provider that rotates refresh tokens has already used up old's.
 func (a *Auth) refresh(r *http.Request, old *Session) (s *Session, retry bool, err error) {
@@ -419,13 +439,25 @@ func (a *Auth) refresh(r *http.Request, old *Session) (s *Session, retry bool, e
 		}
 		res := refreshResult{}
 		fresh, err := a.session(ctx, tok, "")
-		if err != nil {
+		switch {
+		case err != nil && !keysUnavailable(err):
+			// A token desk will never accept (audience, issuer, signature):
+			// a setup problem, so the session ends rather than retrying.
+			a.log.Error(err, "The provider's refreshed ID token does not verify; ending the session")
+			return nil, fmt.Errorf("%w: %w", errInvalidIDToken, err)
+		case err != nil:
+			a.log.Info("Could not fetch the provider's signing keys to verify a refreshed ID token; the browser will retry",
+				"error", err.Error())
 			kept := *old
 			if tok.RefreshToken != "" {
 				kept.RefreshToken = tok.RefreshToken
 			}
 			res.session, res.retry = &kept, true
-		} else {
+			if kept.RefreshToken == refreshToken {
+				// Nothing was used up: the next attempt asks the provider again.
+				return res, nil
+			}
+		default:
 			if fresh.RefreshToken == "" {
 				// The provider does not rotate refresh tokens.
 				fresh.RefreshToken = refreshToken
@@ -437,14 +469,30 @@ func (a *Auth) refresh(r *http.Request, old *Session) (s *Session, retry bool, e
 		now := time.Now()
 		if a.refreshed == nil {
 			a.refreshed = map[[sha256.Size]byte]refreshResult{}
+			a.retriedFrom = map[[sha256.Size]byte][sha256.Size]byte{}
 		}
 		for k, v := range a.refreshed {
 			if now.After(v.until) {
 				delete(a.refreshed, k)
+				delete(a.retriedFrom, sha256.Sum256([]byte(v.session.RefreshToken)))
 			}
 		}
 		res.until = now.Add(refreshGrace)
 		a.refreshed[key] = res
+		// Requests still carrying the refresh token that an earlier retry
+		// replaced get this outcome too, not the used-up token of the retry.
+		for k, ok := key, true; ok; {
+			var parent [sha256.Size]byte
+			if parent, ok = a.retriedFrom[k]; ok {
+				if _, live := a.refreshed[parent]; live {
+					a.refreshed[parent] = res
+				}
+				k = parent
+			}
+		}
+		if res.retry {
+			a.retriedFrom[sha256.Sum256([]byte(res.session.RefreshToken))] = key
+		}
 		return res, nil
 	})
 	if err != nil {

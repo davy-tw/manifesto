@@ -527,7 +527,15 @@ async function start() {
     document.body.replaceChildren(h('main', { class: 'signin' },
       h('h1', {}, 'Manifesto desk'),
       notice(`Desk is not available right now: ${err.message || err}`),
-      h('p', {}, h('button', { type: 'button', class: 'primary', onclick: () => location.reload() }, 'Try again'))));
+      h('p', {},
+        h('button', { type: 'button', class: 'primary', onclick: () => location.reload() }, 'Try again'), ' ',
+        h('button', {
+          type: 'button',
+          onclick: async () => {
+            await api.logout().catch(() => {});
+            location.href = '/';
+          },
+        }, 'Sign out'))));
     return;
   }
   subject = [me.username, ...[...(me.groups || [])].sort()].join('\n');

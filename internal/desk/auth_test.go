@@ -50,9 +50,19 @@ type fakeIssuer struct {
 	failNext int
 	// noIDToken leaves the ID token out of refresh responses.
 	noIDToken bool
-	// badIDTokenNext makes the next refresh return an ID token desk cannot
-	// verify (here: for another audience), after rotating the refresh token.
+	// badIDTokenNext makes the next refresh return an ID token desk will
+	// never accept (for another audience), after rotating the refresh token.
 	badIDTokenNext bool
+	// newKeyNext signs the next refreshed ID token with a key desk has not
+	// seen (k2), so desk fetches the key set, which fails while keysDown.
+	newKeyNext bool
+	keysDown   bool
+	// k2Published adds k2 to the key set; desk has never seen it before then.
+	k2Published bool
+	signer2     jose.Signer
+	key2        *rsa.PrivateKey
+	// noRotate keeps the same refresh token on refresh.
+	noRotate bool
 }
 
 func newFakeIssuer(t *testing.T) *fakeIssuer {
@@ -76,7 +86,15 @@ func startFakeIssuer() (*fakeIssuer, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := &fakeIssuer{key: key, signer: signer, codes: map[string]string{}, lifetime: time.Hour}
+	key2, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+	signer2, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: jose.JSONWebKey{Key: key2, KeyID: "k2"}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	f := &fakeIssuer{key: key, signer: signer, key2: key2, signer2: signer2, codes: map[string]string{}, lifetime: time.Hour}
 	mux := http.NewServeMux()
 	f.Server = httptest.NewTLSServer(mux)
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
@@ -86,7 +104,17 @@ func startFakeIssuer() (*fakeIssuer, error) {
 		})
 	})
 	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "k1", Algorithm: "RS256", Use: "sig"}}})
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.keysDown {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		keys := []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "k1", Algorithm: "RS256", Use: "sig"}}
+		if f.k2Published {
+			keys = append(keys, jose.JSONWebKey{Key: &key2.PublicKey, KeyID: "k2", Algorithm: "RS256", Use: "sig"})
+		}
+		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: keys})
 	})
 	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -128,8 +156,10 @@ func startFakeIssuer() (*fakeIssuer, error) {
 			}
 			f.refresh++
 		}
-		f.issued++
-		f.current = fmt.Sprintf("rt-%d", f.issued)
+		if !f.noRotate || f.current == "" {
+			f.issued++
+			f.current = fmt.Sprintf("rt-%d", f.issued)
+		}
 		if f.nonce != "" {
 			nonce = f.nonce
 		}
@@ -145,6 +175,10 @@ func startFakeIssuer() (*fakeIssuer, error) {
 			f.badIDTokenNext = false
 			resp["id_token"] = f.signedIDToken(nonce, "someone-else")
 		}
+		if f.newKeyNext && r.Form.Get("grant_type") == "refresh_token" {
+			f.newKeyNext, f.k2Published = false, true
+			resp["id_token"] = f.signWith(f.signer2, nonce, "manifesto-desk")
+		}
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 	return f, nil
@@ -156,6 +190,10 @@ var testGroups = []string{"blog-alice-editors"}
 func (f *fakeIssuer) idToken(nonce string) string { return f.signedIDToken(nonce, "manifesto-desk") }
 
 func (f *fakeIssuer) signedIDToken(nonce, audience string) string {
+	return f.signWith(f.signer, nonce, audience)
+}
+
+func (f *fakeIssuer) signWith(signer jose.Signer, nonce, audience string) string {
 	now := time.Now()
 	claims := map[string]any{
 		"iss": f.URL, "sub": "alice", "aud": audience, "email": "alice@example.io", "name": "Alice",
@@ -164,7 +202,7 @@ func (f *fakeIssuer) signedIDToken(nonce, audience string) string {
 	if nonce != "" {
 		claims["nonce"] = nonce
 	}
-	raw, err := jwt.Signed(f.signer).Claims(claims).Serialize()
+	raw, err := jwt.Signed(signer).Claims(claims).Serialize()
 	if err != nil {
 		panic(err)
 	}
@@ -425,20 +463,41 @@ func TestRefreshFailures(t *testing.T) {
 	}
 	issuer.noIDToken = false
 
-	// An ID token that does not verify, after the provider rotated the
-	// refresh token: the new refresh token is kept for the retry, also for
-	// a request still carrying the old cookie.
+	// The provider signs with a new key while its key set cannot be
+	// fetched, after rotating the refresh token: the new refresh token is
+	// kept for the retry, also for a request still carrying the old cookie.
 	b = signIn(t, issuer, a)
 	stale := maps.Clone(b.cookies)
-	issuer.badIDTokenNext = true
+	issuer.newKeyNext, issuer.keysDown = true, true
 	if got := b.refresh(a); got != http.StatusServiceUnavailable {
-		t.Fatalf("unverifiable ID token: refresh = %d, want 503", got)
+		t.Fatalf("signing keys unavailable: refresh = %d, want 503", got)
 	}
+	issuer.keysDown = false
 	if got := refreshWith(a, stale).StatusCode; got != http.StatusServiceUnavailable {
 		t.Errorf("old cookie after the failure: refresh = %d, want 503", got)
 	}
 	if got := b.refresh(a); got != http.StatusNoContent || issuer.reused != 0 {
-		t.Fatalf("retry after an unverifiable ID token = %d, reused %d", got, issuer.reused)
+		t.Fatalf("retry = %d, reused %d", got, issuer.reused)
+	}
+	// The old cookie, arriving after the retry succeeded, gets the retry's
+	// outcome, not the refresh token the retry used up.
+	resp = refreshWith(a, stale)
+	var s Session
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, c := range resp.Cookies() {
+		req.AddCookie(c)
+	}
+	if err := a.sealer.ReadCookie(req, sessionCookie, &s); err != nil || resp.StatusCode != http.StatusNoContent || s.RefreshToken != issuer.current {
+		t.Errorf("old cookie after the retry = %d, refresh token %q, want %q", resp.StatusCode, s.RefreshToken, issuer.current)
+	}
+
+	// An ID token desk will never accept ends the session, not a retry loop.
+	b = signIn(t, issuer, a)
+	issuer.badIDTokenNext = true
+	resp = refreshWith(a, b.cookies)
+	msg, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusUnauthorized || !strings.Contains(string(msg), "invalid ID token") {
+		t.Errorf("ID token for another audience: refresh = %d %s, want 401", resp.StatusCode, msg)
 	}
 
 	// A refused refresh token ends the session.
@@ -449,6 +508,24 @@ func TestRefreshFailures(t *testing.T) {
 	}
 	if _, ok := b2.cookies[sessionCookie]; ok {
 		t.Error("a refused refresh token kept the session")
+	}
+}
+
+// A provider that keeps the refresh token: a failed verification is not
+// cached, so the next attempt asks the provider again.
+func TestRetryWithoutRotation(t *testing.T) {
+	issuer := newFakeIssuer(t)
+	issuer.lifetime = 3 * time.Second
+	issuer.noRotate = true
+	a := newAuth(t, issuer)
+	b := signIn(t, issuer, a)
+	issuer.newKeyNext, issuer.keysDown = true, true
+	if got := b.refresh(a); got != http.StatusServiceUnavailable {
+		t.Fatalf("signing keys unavailable: refresh = %d, want 503", got)
+	}
+	issuer.keysDown = false
+	if got := b.refresh(a); got != http.StatusNoContent || issuer.refresh != 2 {
+		t.Errorf("retry = %d after %d grants; want a new grant at once", got, issuer.refresh)
 	}
 }
 

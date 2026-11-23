@@ -82,6 +82,7 @@ func main() {
 			Scopes:       strings.Split(scopes, ","),
 			TokenSignIn:  tokenSignIn,
 			Secure:       public.Scheme == "https",
+			Log:          log.WithName("auth"),
 		}, sealer); err != nil {
 			fail(err, "Cannot set up OIDC")
 		}

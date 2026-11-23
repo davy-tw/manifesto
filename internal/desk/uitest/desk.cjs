@@ -188,6 +188,12 @@ const path = require('path');
     await tp.fill('#ns', 'blog-ui');
     await tp.press('#ns', 'Enter');
     await tp.getByRole('link', { name: 'Edited after restore' }).waitFor();
+    // Sign out is the way out when the session cannot be renewed.
+    await tp.route('**/api/session', (r) => r.fulfill({ status: 503, contentType: 'text/plain', body: 'identity provider unavailable' }));
+    await tp.reload();
+    await tp.getByRole('button', { name: 'Sign out' }).click();
+    await tp.unroute('**/api/session');
+    await tp.locator('#token').waitFor();
     await other.close();
     console.log('UI OK');
   } catch (e) {
