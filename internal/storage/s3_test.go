@@ -373,12 +373,15 @@ func TestS3PublicURL(t *testing.T) {
 // gofakes3 lacks: it remembers the checksum of each PUT, keeps it on
 // copies and reports it on HEAD with x-amz-checksum-mode: ENABLED. If check
 // is set it refuses a PUT whose body does not match, as S3 does; otherwise
-// it stores the uploader's claim unchecked. It counts object GETs.
+// it stores the uploader's claim unchecked. If refuseSDK is set it refuses
+// every PUT with the header that is not presigned, the way a service that
+// does not take the header might. It counts object GETs and HEADs asking
+// for checksums.
 type checksumS3 struct {
-	check bool
-	mu    sync.Mutex
-	sums  map[string]string
-	gets  int
+	check, refuseSDK bool
+	mu               sync.Mutex
+	sums             map[string]string
+	gets, sumHeads   int
 }
 
 func (c *checksumS3) wrap(next http.Handler, _ *s3mem.Backend) http.Handler {
@@ -394,6 +397,11 @@ func (c *checksumS3) wrap(next http.Handler, _ *s3mem.Backend) http.Handler {
 		case r.Method == http.MethodPut:
 			body, _ := io.ReadAll(r.Body)
 			claim := r.Header.Get("X-Amz-Checksum-Sha256")
+			if c.refuseSDK && claim != "" && r.URL.Query().Get("X-Amz-Signature") == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `<Error><Code>InvalidArgument</Code></Error>`)
+				return
+			}
 			sum := sha256.Sum256(body)
 			if c.check && claim != "" && claim != base64.StdEncoding.EncodeToString(sum[:]) {
 				w.WriteHeader(http.StatusBadRequest)
@@ -403,6 +411,7 @@ func (c *checksumS3) wrap(next http.Handler, _ *s3mem.Backend) http.Handler {
 			c.sums[key] = claim
 			r.Body = io.NopCloser(bytes.NewReader(body))
 		case r.Method == http.MethodHead && r.Header.Get("X-Amz-Checksum-Mode") == "ENABLED":
+			c.sumHeads++
 			if sum := c.sums[key]; sum != "" {
 				w.Header().Set("X-Amz-Checksum-Sha256", sum)
 			}
@@ -456,24 +465,38 @@ func TestS3UsesTheChecksumTheServiceComputed(t *testing.T) {
 		}
 	})
 
-	t.Run("a service that stores checksums unchecked", func(t *testing.T) {
-		fake3 := &checksumS3{}
-		d := newFakeS3With(t, fake3.wrap)
-		up, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
-		// The checksum the service reports is the signed claim, not the
-		// content: press must download the file.
-		upload(t, up, fake)
-		if ok, err := d.Stored(ctx, key, size, false); ok || !IsRejected(err) {
-			t.Fatalf("Stored = %v, %v; want a rejection", ok, err)
-		}
-		upload(t, up, body)
-		if ok, err := d.Stored(ctx, key, size, false); err != nil || !ok {
-			t.Fatalf("Stored = %v, %v", ok, err)
-		}
-		if got := get(t, d.PublicURL(checksumProbe)); got != "" {
-			t.Errorf("the probe was left behind: %q", got)
-		}
-	})
+	for _, unchecked := range []struct {
+		name  string
+		fake3 *checksumS3
+	}{
+		{"a service that stores checksums unchecked", &checksumS3{}},
+		{"a service that refuses the header on the probe but stores uploaded claims unchecked", &checksumS3{refuseSDK: true}},
+	} {
+		t.Run(unchecked.name, func(t *testing.T) {
+			d := newFakeS3With(t, unchecked.fake3.wrap)
+			testUncheckedChecksums(t, d, key, size)
+		})
+	}
+}
+
+func testUncheckedChecksums(t *testing.T, d *S3, key string, size int64) {
+	t.Helper()
+	ctx := context.Background()
+	const body, fake = "the real file", "the fake file"
+	up, _ := d.SignUpload(ctx, key, "text/plain", size, time.Minute)
+	// The checksum the service reports is the signed claim, not the
+	// content: press must download the file.
+	upload(t, up, fake)
+	if ok, err := d.Stored(ctx, key, size, false); ok || !IsRejected(err) {
+		t.Fatalf("Stored = %v, %v; want a rejection", ok, err)
+	}
+	upload(t, up, body)
+	if ok, err := d.Stored(ctx, key, size, false); err != nil || !ok {
+		t.Fatalf("Stored = %v, %v", ok, err)
+	}
+	if got := get(t, d.PublicURL(checksumProbe)); got != "" {
+		t.Errorf("the probe was left behind: %q", got)
+	}
 }
 
 // A Print that is Ready was checked already: press only looks for the file.
@@ -492,8 +515,11 @@ func TestS3TrustsVerifiedObjects(t *testing.T) {
 	if ok, err := d.Stored(ctx, key, size, true); err != nil || !ok {
 		t.Fatalf("Stored = %v, %v", ok, err)
 	}
-	if n := fake3.downloads(); n != 0 {
-		t.Errorf("press downloaded a verified file %d times", n)
+	fake3.mu.Lock()
+	gets, sumHeads := fake3.gets, fake3.sumHeads
+	fake3.mu.Unlock()
+	if gets != 0 || sumHeads != 0 {
+		t.Errorf("press downloaded a verified file %d times and asked for its checksum %d times", gets, sumHeads)
 	}
 	// A file of the wrong size is checked (and rejected) all the same.
 	if ok, err := d.Stored(ctx, key, size+1, true); ok || !IsRejected(err) {

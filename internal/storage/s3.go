@@ -140,7 +140,7 @@ func (d *S3) Stored(ctx context.Context, objectKey string, size int64, verified 
 	if err != nil {
 		return false, err
 	}
-	head, err := d.head(ctx, objectKey)
+	head, err := d.head(ctx, objectKey, false)
 	if err != nil {
 		return false, err
 	}
@@ -149,6 +149,11 @@ func (d *S3) Stored(ctx context.Context, objectKey string, size int64, verified 
 	}
 	if verified && aws.ToInt64(head.ContentLength) == size {
 		return true, nil
+	}
+	// Ask again with the checksum, which only checking needs (with SSE-KMS
+	// it takes kms:Decrypt).
+	if head, err = d.head(ctx, objectKey, true); err != nil || head == nil {
+		return false, err
 	}
 	if err := d.verify(ctx, objectKey, want, size, head); err != nil {
 		return false, err
@@ -164,7 +169,7 @@ func (d *S3) Stored(ctx context.Context, objectKey string, size int64, verified 
 // publish verifies the staged upload of objectKey and copies it into place.
 func (d *S3) publish(ctx context.Context, objectKey, want string, size int64) (bool, error) {
 	staging := StagingPrefix + objectKey
-	head, err := d.head(ctx, staging)
+	head, err := d.head(ctx, staging, true)
 	if err != nil || head == nil {
 		return false, err
 	}
@@ -184,7 +189,7 @@ func (d *S3) publish(ctx context.Context, objectKey, want string, size int64) (b
 	}
 	// The staged upload is deleted only once the copy is known to be good:
 	// a service that is slow to show the copy is asked again next time.
-	copied, err := d.head(ctx, objectKey)
+	copied, err := d.head(ctx, objectKey, true)
 	if err != nil || copied == nil {
 		return false, err
 	}
@@ -259,37 +264,69 @@ const checksumProbe = StagingPrefix + "manifesto-checksum-probe"
 // x-amz-checksum-sha256 does not match its body. Only then does the
 // checksum it reports say what the object holds: a service that stored the
 // uploader's claim unchecked would report the signed, expected hash for any
-// content. It is asked once per process and bucket, with a tiny PUT.
+// content. It is asked once per process and bucket, with two tiny PUTs: one
+// with the right checksum, which must succeed, so that a refusal of the
+// second, wrong one is known to be about the checksum and not, say, a
+// header the service does not take.
 func (d *S3) checksChecksums(ctx context.Context) (bool, error) {
 	if v, ok := checksumChecks.Load(d.bucketID()); ok {
 		return v.(bool), nil
 	}
-	empty := sha256.Sum256(nil)
-	_, err := d.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:         aws.String(d.cfg.Bucket),
-		Key:            aws.String(checksumProbe),
-		Body:           strings.NewReader("not empty"),
-		ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(empty[:])),
-	})
-	var re *awshttp.ResponseError
-	switch {
-	case err == nil:
-		if err := d.deleteKey(ctx, checksumProbe); err != nil {
-			return false, err
-		}
-		checksumChecks.Store(d.bucketID(), false)
-		return false, nil
-	case errors.As(err, &re) && re.HTTPStatusCode() == http.StatusBadRequest:
-		checksumChecks.Store(d.bucketID(), true)
-		return true, nil
+	checks, err := d.probeChecksums(ctx)
+	if err != nil {
+		return false, fmt.Errorf("checking whether the service verifies checksums: %w", err)
 	}
-	return false, fmt.Errorf("checking whether the service verifies checksums: %w", err)
+	checksumChecks.Store(d.bucketID(), checks)
+	return checks, nil
 }
 
-func (d *S3) head(ctx context.Context, key string) (*s3.HeadObjectOutput, error) {
-	head, err := d.client.HeadObject(ctx, &s3.HeadObjectInput{
-		Bucket: aws.String(d.cfg.Bucket), Key: aws.String(key), ChecksumMode: types.ChecksumModeEnabled,
-	})
+func (d *S3) probeChecksums(ctx context.Context) (bool, error) {
+	const body = "manifesto checksum probe"
+	right := sha256.Sum256([]byte(body))
+	wrong := sha256.Sum256(nil)
+	putProbe := func(sum [sha256.Size]byte) error {
+		_, err := d.client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket:         aws.String(d.cfg.Bucket),
+			Key:            aws.String(checksumProbe),
+			Body:           strings.NewReader(body),
+			ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(sum[:])),
+		})
+		return err
+	}
+	refused := func(err error) bool {
+		var re *awshttp.ResponseError
+		return errors.As(err, &re) && re.HTTPStatusCode() == http.StatusBadRequest
+	}
+
+	err := putProbe(right)
+	switch {
+	case refused(err):
+		// The service does not take the header at all.
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	err = putProbe(wrong)
+	if derr := d.deleteKey(ctx, checksumProbe); derr != nil {
+		return false, derr
+	}
+	switch {
+	case err == nil:
+		return false, nil
+	case refused(err):
+		return true, nil
+	}
+	return false, err
+}
+
+// head returns key's HeadObject, or nil if there is no such object. With
+// checksum, it also asks for the checksums the service stored.
+func (d *S3) head(ctx context.Context, key string, checksum bool) (*s3.HeadObjectOutput, error) {
+	in := &s3.HeadObjectInput{Bucket: aws.String(d.cfg.Bucket), Key: aws.String(key)}
+	if checksum {
+		in.ChecksumMode = types.ChecksumModeEnabled
+	}
+	head, err := d.client.HeadObject(ctx, in)
 	if isNotFound(err) {
 		return nil, nil
 	}
