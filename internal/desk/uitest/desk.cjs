@@ -177,6 +177,23 @@ const path = require('path');
     await tp.reload();
     await tp.locator('.gazettes .namespace h2 a', { hasText: 'blog-ui' }).click();
     await tp.getByRole('link', { name: 'Edited after restore' }).waitFor();
+    // A failure that is not "signed out" offers a retry, not the sign-in page.
+    await tp.route('**/api/session', (r) => r.fulfill({ status: 503, contentType: 'text/plain', body: 'identity provider unavailable' }));
+    await tp.reload();
+    await tp.getByText('Desk is not available right now: identity provider unavailable').waitFor();
+    if (await tp.locator('#token').count()) throw new Error('a 503 showed the sign-in page');
+    await tp.unroute('**/api/session');
+    await tp.getByRole('button', { name: 'Try again' }).click();
+    await tp.locator('#who', { hasText: 'system:serviceaccount:blog-ui:token-user' }).waitFor();
+    await tp.fill('#ns', 'blog-ui');
+    await tp.press('#ns', 'Enter');
+    await tp.getByRole('link', { name: 'Edited after restore' }).waitFor();
+    // Sign out is the way out when the session cannot be renewed.
+    await tp.route('**/api/session', (r) => r.fulfill({ status: 503, contentType: 'text/plain', body: 'identity provider unavailable' }));
+    await tp.reload();
+    await tp.getByRole('button', { name: 'Sign out' }).click();
+    await tp.unroute('**/api/session');
+    await tp.locator('#token').waitFor();
     await other.close();
     console.log('UI OK');
   } catch (e) {

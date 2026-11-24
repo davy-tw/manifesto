@@ -360,6 +360,44 @@ func TestOIDCThroughTheAPIServer(t *testing.T) {
 	}
 }
 
+// TestRefreshThroughTheServer: an expired session gets a 401 that tells the
+// browser to refresh, and POST /auth/refresh renews it.
+func TestRefreshThroughTheServer(t *testing.T) {
+	issuer.mu.Lock()
+	issuer.lifetime = 3 * time.Second
+	issuer.mu.Unlock()
+	t.Cleanup(func() {
+		issuer.mu.Lock()
+		issuer.lifetime = time.Hour
+		issuer.mu.Unlock()
+	})
+	a := newAuth(t, issuer)
+	public, _ := url.Parse("http://desk")
+	srv := (&Server{Auth: a, Kube: kube, PublicURL: public, Log: logr.Discard()}).Handler()
+	b := signIn(t, issuer, a)
+	b.handler = srv
+
+	resp := b.do(http.MethodGet, "http://desk/api/session", nil)
+	if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get(RefreshHeader) == "" {
+		t.Fatalf("expired session = %d, %s %q", resp.StatusCode, RefreshHeader, resp.Header.Get(RefreshHeader))
+	}
+	if resp := b.do(http.MethodPost, "http://desk/auth/refresh", nil); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("refresh without the CSRF header = %d, want 403", resp.StatusCode)
+	}
+	issuer.mu.Lock()
+	issuer.lifetime = time.Hour
+	issuer.mu.Unlock()
+	if resp := b.do(http.MethodPost, "http://desk/auth/refresh", http.Header{CSRFHeader: {"1"}}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("refresh = %d", resp.StatusCode)
+	}
+	resp = b.do(http.MethodGet, "http://desk/api/session", nil)
+	var info SessionInfo
+	_ = json.NewDecoder(resp.Body).Decode(&info)
+	if resp.StatusCode != http.StatusOK || info.Name != "Alice" {
+		t.Errorf("session after refresh = %d %+v", resp.StatusCode, info)
+	}
+}
+
 func TestTokenSignIn(t *testing.T) {
 	a, err := NewAuth(context.Background(), AuthConfig{TokenSignIn: true}, newSealer(t))
 	if err != nil {
