@@ -87,13 +87,102 @@ function route() {
   }
 }
 
+// chooseNamespace lists the Gazettes the user may see in every namespace,
+// grouped by namespace. Most authors may only read their own namespaces, so
+// when Kubernetes refuses the cluster-wide list desk asks for a namespace
+// instead.
 function chooseNamespace() {
   const recent = recentNamespaces();
-  show(
-    h('h1', {}, 'Choose a publication'),
-    h('p', {}, 'Enter the namespace of the Gazette you write for.'),
-    recent.length ? h('ul', { class: 'recent' }, recent.map((n) => h('li', {}, h('a', { href: `#/ns/${encodeURIComponent(n)}/dispatches` }, n)))) : null,
-  );
+  const open = (ns) => `#/ns/${encodeURIComponent(ns)}/dispatches`;
+  const input = h('input', { id: 'home-ns', placeholder: 'blog-alice', autocomplete: 'off', required: true, 'aria-label': 'Namespace' });
+  const form = h('form', {
+    class: 'home-ns',
+    onsubmit: (e) => {
+      e.preventDefault();
+      const ns = input.value.trim();
+      if (ns) location.hash = open(ns);
+    },
+  }, input, h('button', { type: 'submit', class: 'primary' }, 'Open'));
+  const gazettes = h('div', { class: 'gazettes' }, h('p', { class: 'muted', role: 'status' }, 'Looking for publications…'));
+  const recentList = (skip = new Set()) => {
+    const names = recent.filter((n) => !skip.has(n));
+    return names.length
+      ? h('section', {}, h('h2', {}, 'Recent'), h('ul', { class: 'recent' }, names.map((n) => h('li', {}, h('a', { href: open(n) }, n)))))
+      : null;
+  };
+  const recentSection = h('div', {});
+  const askForNamespace = (...before) => {
+    gazettes.replaceChildren(...before, h('p', {}, 'Enter the namespace of the Gazette you write for.'), form);
+    recentSection.replaceChildren(...[recentList()].filter(Boolean));
+    input.focus();
+  };
+  const signal = show(h('h1', {}, 'Choose a publication'), gazettes, recentSection);
+  if (listRefused()) {
+    // Refused earlier in this session: do not ask the API server again.
+    askForNamespace();
+    return;
+  }
+  api.listCluster('gazettes').then((items) => {
+    if (signal.aborted) return;
+    const byNS = new Map();
+    for (const g of items) {
+      const ns = g.metadata.namespace;
+      if (!byNS.has(ns)) byNS.set(ns, []);
+      byNS.get(ns).push(g);
+    }
+    if (!byNS.size) {
+      askForNamespace(h('p', {}, 'There are no Gazettes yet.'));
+      return;
+    }
+    // A namespace's dispatches are not filtered by Gazette, so only the
+    // namespace links; its Gazettes are listed to recognize it.
+    gazettes.replaceChildren(
+      ...[...byNS.keys()].sort().map((ns) =>
+        h('section', { class: 'namespace' },
+          h('h2', {}, h('a', { href: open(ns) }, ns)),
+          h('ul', {}, byNS.get(ns)
+            .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name))
+            .map((g) => h('li', {},
+              g.spec.title || g.metadata.name,
+              g.spec.domain ? h('span', { class: 'muted' }, ` ${g.spec.domain}`) : null))),
+        ),
+      ),
+      h('p', {}, 'Or enter another namespace:'),
+      form,
+    );
+    recentSection.replaceChildren(...[recentList(new Set(byNS.keys()))].filter(Boolean));
+  }).catch((err) => {
+    if (signal.aborted) return;
+    if (err.status === 403) {
+      // Not allowed to list every namespace: that is the usual case.
+      rememberListRefused();
+      askForNamespace();
+    } else {
+      askForNamespace(failure(err));
+    }
+  });
+}
+
+// The cluster-wide Gazette list is refused to most authors. Remember that
+// for the browser session, so the home page does not ask (and the API
+// server does not audit a refusal) every time. It is remembered for the
+// signed-in user and groups only (RBAC decides by both): another user, or
+// the same user in other groups, asks again.
+const LIST_REFUSED = 'manifesto.gazetteListRefused';
+let subject = '';
+function listRefused() {
+  try {
+    return subject !== '' && sessionStorage.getItem(LIST_REFUSED) === subject;
+  } catch {
+    return false;
+  }
+}
+function rememberListRefused() {
+  try {
+    if (subject) sessionStorage.setItem(LIST_REFUSED, subject);
+  } catch {
+    // storage unavailable
+  }
 }
 
 // --- dispatches ----------------------------------------------------------------
@@ -432,6 +521,7 @@ async function start() {
     await signInPage();
     return;
   }
+  subject = [me.username, ...[...(me.groups || [])].sort()].join('\n');
   document.getElementById('who').textContent = me.name || me.username;
   document.getElementById('who').title = me.username;
   document.getElementById('signout').addEventListener('click', async () => {

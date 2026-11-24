@@ -20,8 +20,29 @@ const path = require('path');
     await page.getByRole('heading', { name: 'Choose a publication' }).waitFor();
     // First sign-in: no recent namespaces, and no stray "null" either.
     if ((await page.textContent('#main')).includes('null')) throw new Error('namespace chooser shows "null"');
+    // Alice may not list Gazettes in every namespace: desk asks for one.
+    await page.getByText('Enter the namespace of the Gazette you write for.').waitFor();
+    if (await page.locator('#main .notice').count()) throw new Error('a refused cluster-wide list shows an error');
+    const refusal = await page.evaluate(() => sessionStorage.getItem('manifesto.gazetteListRefused'));
+    if (!refusal) throw new Error('the refusal was not remembered');
+    await page.screenshot({ path: path.join(shots, 'desk-home-namespace.png') });
 
     step('open the publication');
+    await page.fill('#home-ns', 'blog-ui');
+    await page.press('#home-ns', 'Enter');
+    await page.getByText('No dispatches yet.').waitFor();
+
+    step('open it again from the namespace box in the header');
+    // The refusal is remembered: the home page does not ask again.
+    let asked = false;
+    const onRequest = (req) => { if (req.url().endsWith('/v1alpha1/gazettes')) asked = true; };
+    page.on('request', onRequest);
+    await page.goto(url + '/#/');
+    await page.getByRole('heading', { name: 'Choose a publication' }).waitFor();
+    await page.getByText('Enter the namespace of the Gazette you write for.').waitFor();
+    await page.locator('.recent a', { hasText: 'blog-ui' }).waitFor();
+    page.off('request', onRequest);
+    if (asked) throw new Error('the refused Gazette list was requested again');
     await page.fill('#ns', 'blog-ui');
     await page.press('#ns', 'Enter');
     await page.getByText('No dispatches yet.').waitFor();
@@ -134,10 +155,27 @@ const path = require('path');
     await tp.getByText('the API server did not accept this token').waitFor();
     await tp.fill('#token', process.env.DESK_UI_TOKEN);
     await tp.screenshot({ path: path.join(shots, 'desk-token-signin.png') });
+    // alice's refusal, remembered in this tab, does not apply to another user.
+    await tp.evaluate((v) => sessionStorage.setItem('manifesto.gazetteListRefused', v), refusal);
     await tp.getByRole('button', { name: 'Sign in with token' }).click();
     await tp.locator('#who', { hasText: 'system:serviceaccount:blog-ui:token-user' }).waitFor();
-    await tp.fill('#ns', 'blog-ui');
-    await tp.press('#ns', 'Enter');
+    // This user may list Gazettes everywhere: they are grouped by namespace.
+    await tp.locator('.gazettes .namespace h2', { hasText: 'blog-ui' }).waitFor();
+    await tp.screenshot({ path: path.join(shots, 'desk-home-gazettes.png') });
+    await tp.locator('.gazettes .namespace li', { hasText: "Alice's Notes" }).waitFor();
+    // Namespaces listed above are not repeated under Recent.
+    await tp.evaluate(() => localStorage.setItem('manifesto.recentNamespaces', JSON.stringify(['blog-ui', 'blog-elsewhere'])));
+    await tp.reload();
+    await tp.locator('.recent a', { hasText: 'blog-elsewhere' }).waitFor();
+    if (await tp.locator('.recent a', { hasText: 'blog-ui' }).count()) throw new Error('Recent repeats a listed namespace');
+    // Any other failure is shown, and the namespace form stays.
+    await tp.route('**/v1alpha1/gazettes', (r) => r.fulfill({ status: 500, contentType: 'text/plain', body: 'etcd is on fire' }));
+    await tp.reload();
+    await tp.locator('#main .notice', { hasText: 'etcd is on fire' }).waitFor();
+    await tp.locator('#home-ns').waitFor();
+    await tp.unroute('**/v1alpha1/gazettes');
+    await tp.reload();
+    await tp.locator('.gazettes .namespace h2 a', { hasText: 'blog-ui' }).click();
     await tp.getByRole('link', { name: 'Edited after restore' }).waitFor();
     await other.close();
     console.log('UI OK');
